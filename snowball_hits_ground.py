@@ -1,18 +1,22 @@
 import taichi as ti
+# import taichi_glsl as ts
 import numpy as np
 
 ti.init(arch=ti.gpu)  # Try to run on GPU
 
 
-quality = 2 # Use a larger value for higher-res simulations
-n_particles, n_grid = 5_000 * quality**2, 128 * quality
+quality = 4 # Use a larger value for higher-res simulations
+n_particles, n_grid = 1_000 * quality**2, 128 * quality
 dx, inv_dx = 1 / n_grid, float(n_grid)
 dt = 1e-4 / quality
 p_vol, p_rho = (dx * 0.5) ** 2, 1
 p_mass = p_vol * p_rho
-E, nu = 5e3, 0.2  # Young's modulus and Poisson's ratio
-mu_0, lambda_0 = E / (2 * (1 + nu)), E * nu / ((1 + nu) * (1 - 2 * nu))  # Lame parameters
-
+E = 5e3  # Young's modulus
+nu = 0.2  # Poisson's ratio
+mu_0 = E / (2 * (1 + nu)) # Lame parameters
+lambda_0 = E * nu / ((1 + nu) * (1 - 2 * nu))  # Lame parameters
+zeta = 100  # Hardening coefficient
+ 
 
 position = ti.Vector.field(2, dtype=float, shape=n_particles)  # position
 velocity = ti.Vector.field(2, dtype=float, shape=n_particles)  # velocity
@@ -30,7 +34,7 @@ R = 0.5 # initial radius of the snowball
 # GRAVITY = 9.81
 GRAVITY = 3
 t = np.linspace(0, 2 * np.pi, n_particles + 2, dtype=np.float32)[1:-1] # in (0, 2pi)
-thetas = ti.field(dtype=float, shape=n_particles)
+thetas = ti.field(dtype=float, shape=n_particles)  # used to parametrize the snowball
 thetas.from_numpy(t)
 
 
@@ -50,12 +54,8 @@ def substep():
         # deformation gradient update
         F[p] = (ti.Matrix.identity(float, 2) + dt * C[p]) @ F[p]
         # Hardening coefficient: snow gets harder when compressed
-        h = ti.max(0.1, ti.min(5, ti.exp(10 * (1.0 - Jp[p]))))
-        # if material[p] == 1:  # jelly, make it softer
-            # h = 0.3
+        h = ti.max(0.1, ti.min(5, ti.exp(zeta * (1.0 - Jp[p]))))
         mu, la = mu_0 * h, lambda_0 * h
-        # if material[p] == 0:  # liquid
-            # mu = 0.0
         U, sig, V = ti.svd(F[p])
         J = 1.0
         for d in ti.static(range(2)):
@@ -65,11 +65,7 @@ def substep():
             Jp[p] *= sig[d, d] / new_sig
             sig[d, d] = new_sig
             J *= new_sig
-        # if material[p] == 0:
-            # Reset deformation gradient to avoid numerical instability
-            # F[p] = ti.Matrix.identity(float, 2) * ti.sqrt(J)
-        # elif material[p] == 2:
-            # Reconstruct elastic deformation gradient after plasticity
+        # Reconstruct elastic deformation gradient after plasticity
         F[p] = U @ sig @ V.transpose()
         stress = 2 * mu * (F[p] - U @ V.transpose()) @ F[p].transpose() + ti.Matrix.identity(float, 2) * la * J * (J - 1)
         stress = (-dt * p_vol * 4 * inv_dx * inv_dx) * stress
@@ -131,7 +127,7 @@ def reset():
 
 
 def main():
-    print("[Hint] Use WSAD/arrow keys to control gravity. Use left/right mouse buttons to attract/repel. Press R to reset.")
+    # print("[Hint] Use WSAD/arrow keys to control gravity. Use left/right mouse buttons to attract/repel. Press R to reset.")
     gui = ti.GUI("Taichi MLS-MPM-128", res=512, background_color=0x112F41)
     gravity[None] = [0, -GRAVITY]
     reset()
