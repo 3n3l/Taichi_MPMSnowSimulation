@@ -1,22 +1,28 @@
 import taichi as ti
-# import taichi_glsl as ts
 import numpy as np
 
 ti.init(arch=ti.gpu)  # Try to run on GPU
 
 
-quality = 4 # Use a larger value for higher-res simulations
+# Parameter starting points for MPM
+E = 1.4e5  # Young's modulus
+nu = 0.2  # Poisson's ratio
+zeta = 10 # Hardening coefficient
+theta_c = 2.5e-2 # Critical compression
+theta_s = 7.5e-3 # Critical stretch
+rho_0 = 4e2  # Initial density
+mu_0 = E / (2 * (1 + nu)) # Lame parameters
+lambda_0 = E * nu / ((1 + nu) * (1 - 2 * nu))  # Lame parameters
+ 
+
+# Parameter to control the simulation
+quality = 5 # Use a larger value for higher-res simulations
 n_particles, n_grid = 1_000 * quality**2, 128 * quality
 dx, inv_dx = 1 / n_grid, float(n_grid)
 dt = 1e-4 / quality
-p_vol, p_rho = (dx * 0.5) ** 2, 1
-p_mass = p_vol * p_rho
-E = 5e3  # Young's modulus
-nu = 0.2  # Poisson's ratio
-mu_0 = E / (2 * (1 + nu)) # Lame parameters
-lambda_0 = E * nu / ((1 + nu) * (1 - 2 * nu))  # Lame parameters
-zeta = 100  # Hardening coefficient
- 
+p_vol = (dx * 0.5) ** 2
+p_mass = p_vol * rho_0
+
 
 position = ti.Vector.field(2, dtype=float, shape=n_particles)  # position
 velocity = ti.Vector.field(2, dtype=float, shape=n_particles)  # velocity
@@ -30,12 +36,13 @@ attractor_strength = ti.field(dtype=float, shape=())
 attractor_pos = ti.Vector.field(2, dtype=float, shape=())
 
 
-R = 0.5 # initial radius of the snowball
-# GRAVITY = 9.81
-GRAVITY = 3
+# Control gravity, construct snowball
 t = np.linspace(0, 2 * np.pi, n_particles + 2, dtype=np.float32)[1:-1] # in (0, 2pi)
 thetas = ti.field(dtype=float, shape=n_particles)  # used to parametrize the snowball
 thetas.from_numpy(t)
+# GRAVITY = 9.81
+GRAVITY = 1
+R = 0.05 # initial radius of the snowball
 
 
 @ti.kernel
@@ -54,19 +61,19 @@ def substep():
         # deformation gradient update
         F[p] = (ti.Matrix.identity(float, 2) + dt * C[p]) @ F[p]
         # Hardening coefficient: snow gets harder when compressed
-        h = ti.max(0.1, ti.min(5, ti.exp(zeta * (1.0 - Jp[p]))))
+        h = ti.max(1e-3, ti.min(5, ti.exp(zeta * (1.0 - Jp[p]))))
         mu, la = mu_0 * h, lambda_0 * h
-        U, sig, V = ti.svd(F[p])
+        U, sigma, V = ti.svd(F[p])
         J = 1.0
         for d in ti.static(range(2)):
-            new_sig = sig[d, d]
-            # if material[p] == 2:  # Snow
-            new_sig = min(max(sig[d, d], 1 - 2.5e-2), 1 + 4.5e-3)  # Plasticity
-            Jp[p] *= sig[d, d] / new_sig
-            sig[d, d] = new_sig
-            J *= new_sig
+            singular_value = float(sigma[d, d])
+            singular_value = max(singular_value, 1 - theta_c)
+            singular_value = min(singular_value, 1 + theta_s)  # Plasticity
+            Jp[p] *= sigma[d, d] / singular_value
+            sigma[d, d] = singular_value
+            J *= singular_value
         # Reconstruct elastic deformation gradient after plasticity
-        F[p] = U @ sig @ V.transpose()
+        F[p] = U @ sigma @ V.transpose()
         stress = 2 * mu * (F[p] - U @ V.transpose()) @ F[p].transpose() + ti.Matrix.identity(float, 2) * la * J * (J - 1)
         stress = (-dt * p_vol * 4 * inv_dx * inv_dx) * stress
         affine = stress + p_mass * C[p]
@@ -117,8 +124,8 @@ def reset():
     for i in range(n_particles):
         radius = R * ti.sqrt(ti.random())
         position[i] = [
-            radius * (ti.sin(thetas[i]) * 0.1) + 0.5,
-            radius * (ti.cos(thetas[i]) * 0.1) + 0.5,
+            radius * (ti.sin(thetas[i])) + 0.5,
+            radius * (ti.cos(thetas[i])) + 0.5,
         ]
         F[i] = ti.Matrix([[1, 0], [0, 1]])
         C[i] = ti.Matrix.zero(float, 2, 2)
