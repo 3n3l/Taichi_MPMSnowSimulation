@@ -27,8 +27,12 @@ attractor_pos = ti.Vector.field(2, dtype=float, shape=())
 
 
 R = 0.5 # initial radius of the snowball
-GRAVITY = 9.81
-THETAS = np.linspace(0, 2 * np.pi, n_particles + 2, dtype=np.float32)[1:-1] # = (0, 2pi)
+# GRAVITY = 9.81
+GRAVITY = 3
+t = np.linspace(0, 2 * np.pi, n_particles + 2, dtype=np.float32)[1:-1] # in (0, 2pi)
+thetas = ti.field(dtype=float, shape=n_particles)
+thetas.from_numpy(t)
+
 
 @ti.kernel
 def substep():
@@ -113,7 +117,7 @@ def substep():
 
 
 @ti.kernel
-def reset(thetas:ti.types.ndarray()):
+def reset():
     for i in range(n_particles):
         radius = R * ti.sqrt(ti.random())
         position[i] = [
@@ -126,54 +130,34 @@ def reset(thetas:ti.types.ndarray()):
         Jp[i] = 1
 
 
-def parametrize_circle(pos) -> np.ndarray:
-    thetas = np.linspace(0, 2 * np.pi, n_particles + 2)[1:-1] # = (0, 2pi)
-    disk_pos = np.zeros((n_particles, 2))
-    disk_pos[..., 0] = np.sin(thetas)
-    disk_pos[..., 1] = np.cos(thetas)
-    return disk_pos
-
-
 def main():
     print("[Hint] Use WSAD/arrow keys to control gravity. Use left/right mouse buttons to attract/repel. Press R to reset.")
     gui = ti.GUI("Taichi MLS-MPM-128", res=512, background_color=0x112F41)
     gravity[None] = [0, -GRAVITY]
-    reset(THETAS)
+    reset()
 
     for _ in range(20_000):
         if gui.get_event(ti.GUI.PRESS):
             if gui.event.key == "r":
-                reset(THETAS)
+                reset()
             elif gui.event.key in [ti.GUI.ESCAPE, ti.GUI.EXIT]:
                 break
         # if gui.event is not None:
-            # gravity[None] = [0, -GRAVITY]  # if had any event
+        #     gravity[None] = [0, 0]  # if had any event
         # if gui.is_pressed(ti.GUI.LEFT, "a"):
-        #     gravity[None][0] = -1
+        #     gravity[None][0] = -GRAVITY
         # if gui.is_pressed(ti.GUI.RIGHT, "d"):
-        #     gravity[None][0] = 1
+        #     gravity[None][0] = GRAVITY
         # if gui.is_pressed(ti.GUI.UP, "w"):
-        #     gravity[None][1] = 1
+        #     gravity[None][1] = GRAVITY
         # if gui.is_pressed(ti.GUI.DOWN, "s"):
-        #     gravity[None][1] = -1
-        # mouse = gui.get_cursor_pos()
-        # gui.circle((mouse[0], mouse[1]), color=0x336699, radius=15)
-        # attractor_pos[None] = [mouse[0], mouse[1]]
-        # attractor_strength[None] = 0
-        # if gui.is_pressed(ti.GUI.LMB):
-            # attractor_strength[None] = 1
-        # if gui.is_pressed(ti.GUI.RMB):
-            # attractor_strength[None] = -1
+        #     gravity[None][1] = -GRAVITY
+
         for _ in range(int(2e-3 // dt)):
             substep()
 
-        gui.circles(
-            position.to_numpy(),
-            radius=1,
-        )
-
-        # Change to gui.show(f'{frame:06d}.png') to write images to disk
-        gui.show()
+        gui.circles(position.to_numpy(), radius=1)
+        gui.show() # change to gui.show(f'{frame:06d}.png') to write images to disk
 
 if __name__ == "__main__":
     main()
