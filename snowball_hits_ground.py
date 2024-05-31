@@ -16,7 +16,7 @@ lambda_0 = E * nu / ((1 + nu) * (1 - 2 * nu))  # Lame parameters
  
 
 # Parameter to control the simulation
-quality = 5 # Use a larger value for higher-res simulations
+quality = 4 # Use a larger value for higher-res simulations
 n_particles, n_grid = 1_000 * quality**2, 128 * quality
 dx, inv_dx = 1 / n_grid, float(n_grid)
 dt = 1e-4 / quality
@@ -30,8 +30,8 @@ velocity = ti.Vector.field(2, dtype=float, shape=n_particles)  # velocity
 C = ti.Matrix.field(2, 2, dtype=float, shape=n_particles)  # affine velocity field
 F = ti.Matrix.field(2, 2, dtype=float, shape=n_particles)  # deformation gradient
 Jp = ti.field(dtype=float, shape=n_particles)  # plastic deformation
-grid_v = ti.Vector.field(2, dtype=float, shape=(n_grid, n_grid))  # grid node momentum/velocity
-grid_m = ti.field(dtype=float, shape=(n_grid, n_grid))  # grid node mass
+grid_velo = ti.Vector.field(2, dtype=float, shape=(n_grid, n_grid))  # grid node momentum/velocity
+grid_mass = ti.field(dtype=float, shape=(n_grid, n_grid))  # grid node mass
 gravity = ti.Vector.field(2, dtype=float, shape=())
 attractor_strength = ti.field(dtype=float, shape=())
 attractor_pos = ti.Vector.field(2, dtype=float, shape=())
@@ -41,17 +41,16 @@ attractor_pos = ti.Vector.field(2, dtype=float, shape=())
 t = np.linspace(0, 2 * np.pi, n_particles + 2, dtype=np.float32)[1:-1] # in (0, 2pi)
 thetas = ti.field(dtype=float, shape=n_particles)  # used to parametrize the snowball
 thetas.from_numpy(t)
-# GRAVITY = 9.81
-GRAVITY = 1
+GRAVITY = 9.81
 R = 0.05 # initial radius of the snowball
 
 
 @ti.kernel
 def substep():
     # Reset the grids
-    for i, j in grid_m:
-        grid_v[i, j] = [0, 0]
-        grid_m[i, j] = 0
+    for i, j in grid_mass:
+        grid_velo[i, j] = [0, 0]
+        grid_mass[i, j] = 0
 
     # Particle state update and scatter to grid (P2G)
     for p in position:
@@ -83,8 +82,8 @@ def substep():
             offset = ti.Vector([i, j])
             dpos = (offset.cast(float) - fx) * dx
             weight = w[i][0] * w[j][1]
-            grid_v[base + offset] += weight * (p_mass * velocity[p] + affine @ dpos)
-            grid_m[base + offset] += weight * p_mass
+            grid_velo[base + offset] += weight * (p_mass * velocity[p] + affine @ dpos)
+            grid_mass[base + offset] += weight * p_mass
 
     # Momentum to velocity
     for i, j in grid_mass:
@@ -115,9 +114,9 @@ def substep():
         new_v = ti.Vector.zero(float, 2)
         new_C = ti.Matrix.zero(float, 2, 2)
         for i, j in ti.static(ti.ndrange(3, 3)):
-            # loop over 3x3 grid node neighborhood
+            # Loop over 3x3 grid node neighborhood
             dpos = ti.Vector([i, j]).cast(float) - fx
-            g_v = grid_v[base + ti.Vector([i, j])]
+            g_v = grid_velo[base + ti.Vector([i, j])]
             weight = w[i][0] * w[j][1]
             new_v += weight * g_v
             new_C += 4 * inv_dx * weight * g_v.outer_product(dpos)
@@ -132,6 +131,7 @@ def reset():
         position[i] = [
             radius * (ti.sin(thetas[i])) + 0.5,
             radius * (ti.cos(thetas[i])) + 0.5,
+            # radius * (ti.cos(thetas[i])) + 1.0 - (R + 0.01),
         ]
         F[i] = ti.Matrix([[1, 0], [0, 1]])
         C[i] = ti.Matrix.zero(float, 2, 2)
