@@ -23,6 +23,7 @@ dt = 1e-4 / quality
 p_vol = (dx * 0.5) ** 2
 p_mass = p_vol * rho_0
 
+sticky = 0.5  # TODO: velocity needs to be multiplied with this constant if object was hit?!
 
 position = ti.Vector.field(2, dtype=float, shape=n_particles)  # position
 velocity = ti.Vector.field(2, dtype=float, shape=n_particles)  # velocity
@@ -86,20 +87,25 @@ def substep():
             grid_m[base + offset] += weight * p_mass
 
     # Momentum to velocity
-    for i, j in grid_m:
-        if grid_m[i, j] > 0:  # No need for epsilon here
-            grid_v[i, j] = (1 / grid_m[i, j]) * grid_v[i, j]
-            grid_v[i, j] += dt * gravity[None] * 30  # gravity
-            dist = attractor_pos[None] - dx * ti.Vector([i, j])
-            grid_v[i, j] += dist / (0.01 + dist.norm()) * attractor_strength[None] * dt * 100
-            if i < 3 and grid_v[i, j][0] < 0:
-                grid_v[i, j][0] = 0  # Boundary conditions
-            if i > n_grid - 3 and grid_v[i, j][0] > 0:
-                grid_v[i, j][0] = 0
-            if j < 3 and grid_v[i, j][1] < 0:
-                grid_v[i, j][1] = 0
-            if j > n_grid - 3 and grid_v[i, j][1] > 0:
-                grid_v[i, j][1] = 0
+    for i, j in grid_mass:
+        if grid_mass[i, j] > 0:  # No need for epsilon here
+            grid_velo[i, j] = (1 / grid_mass[i, j]) * grid_velo[i, j]
+            grid_velo[i, j] += dt * gravity[None]  # gravitty
+            # dist = attractor_pos[None] - dx * ti.Vector([i, j])
+            # grid_velo[i, j] += dist / (0.01 + dist.norm()) * attractor_strength[None] * dt * 100
+            # Boundary conditions
+            if i < 3 and grid_velo[i, j][0] < 0:
+                grid_velo[i, j][0] = 0
+                grid_velo[i, j][1] *= sticky
+            if i > n_grid - 3 and grid_velo[i, j][0] > 0:
+                grid_velo[i, j][0] = 0
+                grid_velo[i, j][1] *= sticky
+            if j < 3 and grid_velo[i, j][1] < 0:
+                grid_velo[i, j][1] = 0
+                grid_velo[i, j][0] *= sticky
+            if j > n_grid - 3 and grid_velo[i, j][1] > 0:
+                grid_velo[i, j][1] = 0
+                grid_velo[i, j][0] *= sticky
 
     # Grid to particle (G2P)
     for p in position:
