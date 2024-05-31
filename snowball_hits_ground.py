@@ -7,9 +7,9 @@ ti.init(arch=ti.gpu)  # Try to run on GPU
 # Parameter starting points for MPM
 E = 1.4e5  # Young's modulus
 nu = 0.2  # Poisson's ratio
-zeta = 10 # Hardening coefficient
+zeta = 5  # Hardening coefficient
 theta_c = 2.5e-2 # Critical compression
-theta_s = 7.5e-3 # Critical stretch
+theta_s = 5.0e-3 # Critical stretch
 rho_0 = 4e2  # Initial density
 mu_0 = E / (2 * (1 + nu)) # Lame parameters
 lambda_0 = E * nu / ((1 + nu) * (1 - 2 * nu))  # Lame parameters
@@ -58,7 +58,7 @@ def substep():
         fx = position[p] * inv_dx - base.cast(float)
         # Quadratic kernels  [http://mpm.graphics   Eqn. 123, with x=fx, fx-1,fx-2]
         w = [0.5 * (1.5 - fx) ** 2, 0.75 - (fx - 1) ** 2, 0.5 * (fx - 0.5) ** 2]
-        # deformation gradient update
+        # Deformation gradient update
         F[p] = (ti.Matrix.identity(float, 2) + dt * C[p]) @ F[p]
         # Hardening coefficient: snow gets harder when compressed
         h = ti.exp(zeta * (1.0 - Jp[p]))
@@ -92,17 +92,15 @@ def substep():
             grid_velo[i, j] += dt * gravity[None]  # gravitty
             # dist = attractor_pos[None] - dx * ti.Vector([i, j])
             # grid_velo[i, j] += dist / (0.01 + dist.norm()) * attractor_strength[None] * dt * 100
-            # Boundary conditions
-            if i < 3 and grid_velo[i, j][0] < 0:
+            # Boundary conditions for the grid velocities
+            collision_left = i < 3 and grid_velo[i, j][0] < 0
+            collision_right = i > (n_grid - 3) and grid_velo[i, j][0] > 0
+            if collision_left or collision_right:
                 grid_velo[i, j][0] = 0
                 grid_velo[i, j][1] *= sticky
-            if i > n_grid - 3 and grid_velo[i, j][0] > 0:
-                grid_velo[i, j][0] = 0
-                grid_velo[i, j][1] *= sticky
-            if j < 3 and grid_velo[i, j][1] < 0:
-                grid_velo[i, j][0] *= sticky
-                grid_velo[i, j][1] = 0
-            if j > n_grid - 3 and grid_velo[i, j][1] > 0:
+            collision_top = j < 3 and grid_velo[i, j][1] < 0
+            collision_bottom = j > (n_grid - 3) and grid_velo[i, j][1] > 0
+            if collision_top or collision_bottom:
                 grid_velo[i, j][0] *= sticky
                 grid_velo[i, j][1] = 0
 
@@ -152,7 +150,7 @@ def main():
             elif gui.event.key in [ti.GUI.ESCAPE, ti.GUI.EXIT]:
                 break
         # if gui.event is not None:
-        #     gravity[None] = [0, 0]  # if had any event
+            # gravity[None] = [0, -GRAVITY]  # if had any event
         # if gui.is_pressed(ti.GUI.LEFT, "a"):
         #     gravity[None][0] = -GRAVITY
         # if gui.is_pressed(ti.GUI.RIGHT, "d"):
