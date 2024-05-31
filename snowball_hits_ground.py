@@ -22,8 +22,8 @@ dx, inv_dx = 1 / n_grid, float(n_grid)
 dt = 1e-4 / quality
 p_vol = (dx * 0.5) ** 2
 p_mass = p_vol * rho_0
+sticky = 0.5  # The lower, the stickier the border
 
-sticky = 0.5  # TODO: velocity needs to be multiplied with this constant if object was hit?!
 
 position = ti.Vector.field(2, dtype=float, shape=n_particles)  # position
 velocity = ti.Vector.field(2, dtype=float, shape=n_particles)  # velocity
@@ -100,11 +100,11 @@ def substep():
                 grid_velo[i, j][0] = 0
                 grid_velo[i, j][1] *= sticky
             if j < 3 and grid_velo[i, j][1] < 0:
-                grid_velo[i, j][1] = 0
                 grid_velo[i, j][0] *= sticky
+                grid_velo[i, j][1] = 0
             if j > n_grid - 3 and grid_velo[i, j][1] > 0:
-                grid_velo[i, j][1] = 0
                 grid_velo[i, j][0] *= sticky
+                grid_velo[i, j][1] = 0
 
     # Grid to particle (G2P)
     for p in position:
