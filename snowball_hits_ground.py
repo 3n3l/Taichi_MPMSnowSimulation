@@ -5,12 +5,12 @@ ti.init(arch=ti.gpu)  # Try to run on GPU
 
 
 # Parameter starting points for MPM
-E = 1.4e5  # Young's modulus
-nu = 0.2  # Poisson's ratio
-zeta = 5  # Hardening coefficient
-theta_c = 2.5e-2 # Critical compression
-theta_s = 5.0e-3 # Critical stretch
-rho_0 = 4e2  # Initial density
+E = 1.4e5  # Young's modulus (1.4e5)
+nu = 0.2  # Poisson's ratio (0.2)
+zeta = 10  # Hardening coefficient (10)
+theta_c = 2.5e-2 # Critical compression (2.5e-2)
+theta_s = 4.5e-3 # Critical stretch (7.5e-2)
+rho_0 = 4e2  # Initial density (4e2)
 mu_0 = E / (2 * (1 + nu)) # Lame parameters
 lambda_0 = E * nu / ((1 + nu) * (1 - 2 * nu))  # Lame parameters
  
