@@ -120,7 +120,7 @@ def substep():
             new_v += weight * g_v
             new_C += 4 * inv_dx * weight * g_v.outer_product(dpos)
         velocity[p], C[p] = new_v, new_C
-        position[p] += dt * velocity[p]  # advection
+        position[p] += dt * new_v  # advection
 
 
 @ti.kernel
@@ -140,7 +140,7 @@ def reset():
 
 def main():
     # print("[Hint] Use WSAD/arrow keys to control gravity. Use left/right mouse buttons to attract/repel. Press R to reset.")
-    gui = ti.GUI("Taichi MLS-MPM-128", res=512, background_color=0x112F41)
+    gui = ti.GUI("Dropping a Snowball", res=512, background_color=0x112F41)
     gravity[None] = [0, -GRAVITY]
     reset()
 
@@ -151,7 +151,7 @@ def main():
             elif gui.event.key in [ti.GUI.ESCAPE, ti.GUI.EXIT]:
                 break
         # if gui.event is not None:
-            # gravity[None] = [0, -GRAVITY]  # if had any event
+        #     gravity[None] = [GRAVITY, 0]  # if had any event
         # if gui.is_pressed(ti.GUI.LEFT, "a"):
         #     gravity[None][0] = -GRAVITY
         # if gui.is_pressed(ti.GUI.RIGHT, "d"):
