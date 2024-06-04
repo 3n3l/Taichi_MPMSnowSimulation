@@ -7,7 +7,7 @@ ti.init(arch=ti.gpu)  # Try to run on GPU
 # Parameter starting points for MPM
 E = 1.4e5  # Young's modulus (1.4e5)
 nu = 0.2  # Poisson's ratio (0.2)
-zeta = 5  # Hardening coefficient (10)
+zeta = 10  # Hardening coefficient (10)
 theta_c = 2.5e-2 # Critical compression (2.5e-2)
 theta_s = 4.5e-3 # Critical stretch (7.5e-3)
 rho_0 = 4e2  # Initial density (4e2)
@@ -39,10 +39,10 @@ attractor_pos = ti.Vector.field(2, dtype=float, shape=())
 
 # Control gravity, construct snowball
 t = np.linspace(0, 2 * np.pi, n_particles + 2, dtype=np.float32)[1:-1] # in (0, 2pi)
-thetas = ti.field(dtype=float, shape=n_particles)  # used to parametrize the snowball
-thetas.from_numpy(t)
-INITIAL_VELOCITY = [3, 0]
-GRAVITY = 9.81
+THETAS = ti.field(dtype=float, shape=n_particles)  # used to parametrize the snowball
+THETAS.from_numpy(t)
+INITIAL_VELOCITY = [5, 0]
+INITIAL_GRAVITY = 9.81
 R = 0.05 # initial radius of the snowball
 
 
@@ -126,12 +126,12 @@ def substep():
 
 @ti.kernel
 def reset():
-    gravity[None] = [0, -GRAVITY]
+    gravity[None] = [0, -INITIAL_GRAVITY]
     for i in range(n_particles):
         radius = R * ti.sqrt(ti.random())
         position[i] = [
-            radius * (ti.sin(thetas[i])) + 0.5,
-            radius * (ti.cos(thetas[i])) + 0.5,
+            radius * (ti.sin(THETAS[i])) + 0.5,
+            radius * (ti.cos(THETAS[i])) + 0.5,
             # radius * (ti.cos(thetas[i])) + 1.0 - (R + 0.01),
         ]
         F[i] = ti.Matrix([[1, 0], [0, 1]])
