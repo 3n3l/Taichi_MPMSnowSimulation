@@ -63,7 +63,7 @@ def substep():
         F[p] = (ti.Matrix.identity(float, 2) + dt * C[p]) @ F[p]
         # Hardening coefficient: snow gets harder when compressed
         # NOTE: clamp this to stop the rebound from compressed snow
-        h = ti.max(0.1, ti.min(1.5, ti.exp(zeta * (1.0 - Jp[p]))))
+        h = ti.max(0.1, ti.min(2, ti.exp(zeta * (1.0 - Jp[p]))))
         mu, la = mu_0 * h, lambda_0 * h
         U, sigma, V = ti.svd(F[p])
         J = 1.0
