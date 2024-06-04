@@ -7,9 +7,9 @@ ti.init(arch=ti.gpu)  # Try to run on GPU
 # Parameter starting points for MPM
 E = 1.4e5  # Young's modulus (1.4e5)
 nu = 0.2  # Poisson's ratio (0.2)
-zeta = 10  # Hardening coefficient (10)
+zeta = 5  # Hardening coefficient (10)
 theta_c = 2.5e-2 # Critical compression (2.5e-2)
-theta_s = 4.5e-3 # Critical stretch (7.5e-2)
+theta_s = 4.5e-3 # Critical stretch (7.5e-3)
 rho_0 = 4e2  # Initial density (4e2)
 mu_0 = E / (2 * (1 + nu)) # Lame parameters
 lambda_0 = E * nu / ((1 + nu) * (1 - 2 * nu))  # Lame parameters
@@ -22,7 +22,7 @@ dx, inv_dx = 1 / n_grid, float(n_grid)
 dt = 1e-4 / quality
 p_vol = (dx * 0.5) ** 2
 p_mass = p_vol * rho_0
-sticky = 0.5  # The lower, the stickier the border
+sticky = 0.1  # The lower, the stickier the border
 
 
 position = ti.Vector.field(2, dtype=float, shape=n_particles)  # position
@@ -41,6 +41,7 @@ attractor_pos = ti.Vector.field(2, dtype=float, shape=())
 t = np.linspace(0, 2 * np.pi, n_particles + 2, dtype=np.float32)[1:-1] # in (0, 2pi)
 thetas = ti.field(dtype=float, shape=n_particles)  # used to parametrize the snowball
 thetas.from_numpy(t)
+INITIAL_VELOCITY = [3, 0]
 GRAVITY = 9.81
 R = 0.05 # initial radius of the snowball
 
@@ -125,6 +126,7 @@ def substep():
 
 @ti.kernel
 def reset():
+    gravity[None] = [0, -GRAVITY]
     for i in range(n_particles):
         radius = R * ti.sqrt(ti.random())
         position[i] = [
@@ -134,14 +136,14 @@ def reset():
         ]
         F[i] = ti.Matrix([[1, 0], [0, 1]])
         C[i] = ti.Matrix.zero(float, 2, 2)
-        velocity[i] = [0, 0]
+        # velocity[i] = [0, 0]  # Snowball hits ground
+        velocity[i] = INITIAL_VELOCITY # Snowball hits wall
         Jp[i] = 1
 
 
 def main():
     # print("[Hint] Use WSAD/arrow keys to control gravity. Use left/right mouse buttons to attract/repel. Press R to reset.")
     gui = ti.GUI("Dropping a Snowball", res=512, background_color=0x112F41)
-    gravity[None] = [0, -GRAVITY]
     reset()
 
     for _ in range(20_000):
