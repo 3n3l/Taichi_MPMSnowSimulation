@@ -4,19 +4,19 @@ import numpy as np
 ti.init(arch=ti.gpu)  # Try to run on GPU
 
 
-# Parameter starting points for MPM
+# Parameters starting points for MPM
 E = 1.4e5  # Young's modulus (1.4e5)
 nu = 0.2  # Poisson's ratio (0.2)
 zeta = 10  # Hardening coefficient (10)
-theta_c = 2.5e-2 # Critical compression (2.5e-2)
-theta_s = 4.5e-3 # Critical stretch (7.5e-3)
+theta_c = 3.5e-2 # Critical compression (2.5e-2)
+theta_s = 5.5e-3 # Critical stretch (7.5e-3)
 rho_0 = 4e2  # Initial density (4e2)
 mu_0 = E / (2 * (1 + nu)) # Lame parameters
 lambda_0 = E * nu / ((1 + nu) * (1 - 2 * nu))  # Lame parameters
  
 
-# Parameter to control the simulation
-quality = 4 # Use a larger value for higher-res simulations
+# Parameters to control the simulation
+quality = 3 # Use a larger value for higher-res simulations
 n_particles, n_grid = 1_000 * quality**2, 128 * quality
 dx, inv_dx = 1 / n_grid, float(n_grid)
 dt = 1e-4 / quality
@@ -41,9 +41,10 @@ attractor_pos = ti.Vector.field(2, dtype=float, shape=())
 t = np.linspace(0, 2 * np.pi, n_particles + 2, dtype=np.float32)[1:-1] # in (0, 2pi)
 THETAS = ti.field(dtype=float, shape=n_particles)  # used to parametrize the snowball
 THETAS.from_numpy(t)
-INITIAL_VELOCITY = [5, 0]
-INITIAL_GRAVITY = 9.81
-R = 0.05 # initial radius of the snowball
+INITIAL_VELOCITY = [0, 0]
+INITIAL_GRAVITY = [0, 0]
+GRAVITY = 9.8
+RADIUS = 0.05 # initial radius of the snowball
 
 
 @ti.kernel
@@ -91,9 +92,9 @@ def substep():
     for i, j in grid_mass:
         if grid_mass[i, j] > 0:  # No need for epsilon here
             grid_velo[i, j] = (1 / grid_mass[i, j]) * grid_velo[i, j]
-            grid_velo[i, j] += dt * gravity[None]  # gravitty
-            # dist = attractor_pos[None] - dx * ti.Vector([i, j])
-            # grid_velo[i, j] += dist / (0.01 + dist.norm()) * attractor_strength[None] * dt * 100
+            grid_velo[i, j] += dt * gravity[None]  # gravity
+            dist = attractor_pos[None] - dx * ti.Vector([i, j])
+            grid_velo[i, j] += dist / (0.01 + dist.norm()) * attractor_strength[None] * dt * 100
             # Boundary conditions for the grid velocities
             collision_left = i < 3 and grid_velo[i, j][0] < 0
             collision_right = i > (n_grid - 3) and grid_velo[i, j][0] > 0
@@ -126,9 +127,9 @@ def substep():
 
 @ti.kernel
 def reset():
-    gravity[None] = [0, -INITIAL_GRAVITY]
+    gravity[None] = INITIAL_GRAVITY
     for i in range(n_particles):
-        radius = R * ti.sqrt(ti.random())
+        radius = RADIUS * ti.sqrt(ti.random())
         position[i] = [
             radius * (ti.sin(THETAS[i])) + 0.5,
             radius * (ti.cos(THETAS[i])) + 0.5,
@@ -136,14 +137,13 @@ def reset():
         ]
         F[i] = ti.Matrix([[1, 0], [0, 1]])
         C[i] = ti.Matrix.zero(float, 2, 2)
-        # velocity[i] = [0, 0]  # Snowball hits ground
-        velocity[i] = INITIAL_VELOCITY # Snowball hits wall
+        velocity[i] = INITIAL_VELOCITY
         Jp[i] = 1
 
 
 def main():
     # print("[Hint] Use WSAD/arrow keys to control gravity. Use left/right mouse buttons to attract/repel. Press R to reset.")
-    gui = ti.GUI("Dropping a Snowball", res=512, background_color=0x112F41)
+    gui = ti.GUI("Snowball MLS-MPM", res=512, background_color=0x112F41)
     reset()
 
     for _ in range(20_000):
@@ -152,16 +152,30 @@ def main():
                 reset()
             elif gui.event.key in [ti.GUI.ESCAPE, ti.GUI.EXIT]:
                 break
+
+        # Control gravity
         # if gui.event is not None:
-        #     gravity[None] = [GRAVITY, 0]  # if had any event
-        # if gui.is_pressed(ti.GUI.LEFT, "a"):
-        #     gravity[None][0] = -GRAVITY
-        # if gui.is_pressed(ti.GUI.RIGHT, "d"):
-        #     gravity[None][0] = GRAVITY
-        # if gui.is_pressed(ti.GUI.UP, "w"):
-        #     gravity[None][1] = GRAVITY
-        # if gui.is_pressed(ti.GUI.DOWN, "s"):
-        #     gravity[None][1] = -GRAVITY
+            # gravity[None] = INITIAL_GRAVITY
+        if gui.is_pressed(ti.GUI.LEFT, "a"):
+            gravity[None][0] = -GRAVITY
+        if gui.is_pressed(ti.GUI.RIGHT, "d"):
+            gravity[None][0] = GRAVITY
+        if gui.is_pressed(ti.GUI.UP, "w"):
+            gravity[None][1] = GRAVITY
+        if gui.is_pressed(ti.GUI.DOWN, "s"):
+            gravity[None][1] = -GRAVITY
+
+        # Control attractor
+        mouse = gui.get_cursor_pos()
+        gui.circle((mouse[0], mouse[1]), color=0x336699, radius=15)
+        attractor_pos[None] = [mouse[0], mouse[1]]
+        attractor_strength[None] = 0
+        if gui.is_pressed(ti.GUI.LMB):
+            gravity[None] = [0, -9.8]
+            attractor_strength[None] = 1
+        if gui.is_pressed(ti.GUI.RMB):
+            attractor_strength[None] = -1
+            gravity[None] = [0, -9.8]
 
         for _ in range(int(2e-3 // dt)):
             substep()
