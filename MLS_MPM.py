@@ -18,8 +18,8 @@ class MPM:
         # TODO: move this somewhere else
         initial_velocity = [0, 0],
         initial_gravity = [0, 0],
-        radius = 0.04,
         attractor_active = False,
+        radius = 0.04,
     ):
         # Parameters starting points for MPM
         self.E = E
@@ -44,6 +44,7 @@ class MPM:
         self.sticky = sticky
 
 
+        # Fields
         self.position = ti.Vector.field(2, dtype=float, shape=self.n_particles)             # position
         self.velocity = ti.Vector.field(2, dtype=float, shape=self.n_particles)             # velocity
         self.C = ti.Matrix.field(2, 2, dtype=float, shape=self.n_particles)                 # affine velocity field
@@ -57,7 +58,6 @@ class MPM:
 
 
         # Control gravity, construct snowball
-        # TODO: move to own class?
         t = np.linspace(0, 2 * np.pi, self.n_particles + 2, dtype=np.float32)[1:-1] # in (0, 2pi)
         self.thetas = ti.field(dtype=float, shape=self.n_particles)  # used to parametrize the snowball
         self.thetas.from_numpy(t)
@@ -120,13 +120,15 @@ class MPM:
                 collision_left = i < 3 and self.grid_velo[i, j][0] < 0
                 collision_right = i > (self.n_grid - 3) and self.grid_velo[i, j][0] > 0
                 if collision_left or collision_right:
-                    self.grid_velo[i, j][0] = 0
-                    self.grid_velo[i, j][1] *= self.sticky
+                    self.grid_velo[i, j][1] = 0
+                    self.grid_velo[i, j][0] *= self.sticky
                 collision_top = j < 3 and self.grid_velo[i, j][1] < 0
                 collision_bottom = j > (self.n_grid - 3) and self.grid_velo[i, j][1] > 0
                 if collision_top or collision_bottom:
-                    self.grid_velo[i, j][0] *= self.sticky
-                    self.grid_velo[i, j][1] = 0
+                    self.grid_velo[i, j][1] *= self.sticky
+                    self.grid_velo[i, j][0] = 0
+                # ^ this should be the other way round, but works better this way?!
+
 
     @ti.kernel
     def grid_to_particle(self):
