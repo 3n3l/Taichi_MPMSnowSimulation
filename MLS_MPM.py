@@ -6,6 +6,7 @@ import numpy as np
 class MPM:
     def __init__(
         self,
+        gui=ti.GUI(), # The gui which displays the simulation
         E=1.4e5,  # Young's modulus (1.4e5)
         nu=0.2,  # Poisson's ratio (0.2)
         zeta=10,  # Hardening coefficient (10)
@@ -31,6 +32,7 @@ class MPM:
         self.lambda_0 = E * nu / ((1 + nu) * (1 - 2 * nu))  # Lame parameters
 
         # Parameters to control the simulation
+        self.gui = gui
         self.quality = quality
         self.n_particles = 1_000 * (quality**2)
         self.n_grid = 128 * quality
@@ -164,27 +166,24 @@ class MPM:
             self.Jp[i] = 1
 
     def run(self):
-        # print("[Hint] Use left/right mouse buttons to attract/repel and start the simulation. Press R to reset.")
-        gui = ti.GUI("Snowball MLS-MPM", res=512, background_color=0x0E1018)
         self.reset()
-
         for _ in range(20_000):
-            if gui.get_event(ti.GUI.PRESS):
-                if gui.event.key == "r":
+            if self.gui.get_event(ti.GUI.PRESS):
+                if self.gui.event.key == "r":
                     self.reset()
-                elif gui.event.key in [ti.GUI.ESCAPE, ti.GUI.EXIT]:
+                elif self.gui.event.key in [ti.GUI.ESCAPE, ti.GUI.EXIT]:
                     break
 
             if self.attractor_is_active: # Control attractor
-                mouse = gui.get_cursor_pos()
+                mouse = self.gui.get_cursor_pos()
                 self.attractor_strength[None] = 0
-                if gui.is_pressed(ti.GUI.LMB):
-                    gui.circle((mouse[0], mouse[1]), color=0x336699, radius=10)
+                if self.gui.is_pressed(ti.GUI.LMB):
+                    self.gui.circle((mouse[0], mouse[1]), color=0x336699, radius=10)
                     self.attractor_pos[None] = [mouse[0], mouse[1]]
                     self.gravity[None] = self.initial_gravity
                     self.attractor_strength[None] = 1
-                if gui.is_pressed(ti.GUI.RMB):
-                    gui.circle((mouse[0], mouse[1]), color=0x336699, radius=10)
+                if self.gui.is_pressed(ti.GUI.RMB):
+                    self.gui.circle((mouse[0], mouse[1]), color=0x336699, radius=10)
                     self.attractor_pos[None] = [mouse[0], mouse[1]]
                     self.gravity[None] = self.initial_gravity
                     self.attractor_strength[None] = -1
@@ -195,5 +194,5 @@ class MPM:
                 self.momentum_to_velocity()
                 self.grid_to_particle()
 
-            gui.circles(self.position.to_numpy(), radius=1)
-            gui.show()  # change to gui.show(f'{frame:06d}.png') to write images to disk
+            self.gui.circles(self.position.to_numpy(), radius=1)
+            self.gui.show()  # change to gui.show(f'{frame:06d}.png') to write images to disk

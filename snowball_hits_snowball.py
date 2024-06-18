@@ -7,7 +7,10 @@ ti.init(arch=ti.gpu)  # Try to run on GPU
 
 
 def main():
+    print("[Hint] Press R to reset.")
+    gui = ti.GUI("Snowball hits snowball", res=512, background_color=0x0E1018)
     mpm = MPM(
+        gui=gui,
         E=1.4e5,  # Young's modulus (1.4e5)
         nu=0.2,  # Poisson's ratio (0.2)
         zeta=10,  # Hardening coefficient (10)
