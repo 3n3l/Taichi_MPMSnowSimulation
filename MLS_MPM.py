@@ -1,25 +1,24 @@
 import taichi as ti
 import numpy as np
 
-# ti.init(arch=ti.gpu)  # Try to run on GPU
 
 @ti.data_oriented
 class MPM:
     def __init__(
         self,
-        E = 1.4e5,          # Young's modulus (1.4e5)
-        nu = 0.2,           # Poisson's ratio (0.2)
-        zeta = 10,          # Hardening coefficient (10)
-        theta_c = 2.5e-2,   # Critical compression (2.5e-2)
-        theta_s = 7.5e-3,   # Critical stretch (7.5e-3)
-        rho_0 = 4e2 ,       # Initial density (4e2)
-        sticky = 0.5,       # The lower, the stickier the border
-        quality = 1,        # Use a larger value for higher-res simulations
-        # TODO: move this somewhere else
-        initial_velocity = [0, 0],
-        initial_gravity = [0, 0],
-        attractor_active = False,
-        radius = 0.04,
+        E = 1.4e5,                  # Young's modulus (1.4e5)
+        nu = 0.2,                   # Poisson's ratio (0.2)
+        zeta = 10,                  # Hardening coefficient (10)
+        theta_c = 2.5e-2,           # Critical compression (2.5e-2)
+        theta_s = 7.5e-3,           # Critical stretch (7.5e-3)
+        rho_0 = 4e2 ,               # Initial density (4e2)
+        sticky = 0.5,               # The lower, the stickier the border
+        quality = 1,                # Use a larger value for higher-res simulations
+        initial_gravity = [0, 0],   # Gravity of the simulation ([0, 0])
+        attractor_active = False,   # Enables mouse controlled attractor (False)
+        initial_velocities = np.array([[0, 0]], dtype=np.float32),
+        initial_positions = np.array([[0, 0]], dtype=np.float32),
+        initial_radii = np.array([0.5], dtype=np.float32),
     ):
         # Parameters starting points for MPM
         self.E = E
@@ -34,7 +33,7 @@ class MPM:
 
         # Parameters to control the simulation
         self.quality = quality
-        self.n_particles = 1_000 * quality**2
+        self.n_particles = 1_000 * (quality ** 2)
         self.n_grid = 128 * quality
         self.dx = 1 / self.n_grid
         self.inv_dx = float(self.n_grid)
@@ -42,7 +41,17 @@ class MPM:
         self.p_vol = (self.dx * 0.5) ** 2
         self.p_mass = self.p_vol * rho_0
         self.sticky = sticky
-
+        self.initial_gravity = initial_gravity
+        self.attractor_is_active = attractor_active
+        self.group_size = self.n_particles // initial_radii.shape[0]
+        self.thetas = ti.field(dtype=float, shape=self.group_size)  # used to parametrize the snowball
+        self.thetas.from_numpy(np.linspace(0, 2 * np.pi, self.group_size + 2, dtype=np.float32)[1:-1])
+        self.initial_velocities = ti.Vector.field(n=2, dtype=float, shape=initial_velocities.shape[0])
+        self.initial_positions = ti.Vector.field(n=2, dtype=float, shape=initial_positions.shape[0])
+        self.initial_radii = ti.field(dtype=float, shape=initial_radii.shape[0])
+        self.initial_velocities.from_numpy(initial_velocities)
+        self.initial_positions.from_numpy(initial_positions)
+        self.initial_radii.from_numpy(initial_radii)
 
         # Fields
         self.position = ti.Vector.field(2, dtype=float, shape=self.n_particles)             # position
@@ -55,16 +64,6 @@ class MPM:
         self.gravity = ti.Vector.field(2, dtype=float, shape=())
         self.attractor_strength = ti.field(dtype=float, shape=())
         self.attractor_pos = ti.Vector.field(2, dtype=float, shape=())
-
-
-        # Control gravity, construct snowball
-        t = np.linspace(0, 2 * np.pi, self.n_particles + 2, dtype=np.float32)[1:-1] # in (0, 2pi)
-        self.thetas = ti.field(dtype=float, shape=self.n_particles)  # used to parametrize the snowball
-        self.thetas.from_numpy(t)
-        self.initial_velocity = initial_velocity
-        self.initial_gravity = initial_gravity
-        self.attractor_is_active = attractor_active
-        self.radius = radius
 
 
     @ti.kernel
@@ -153,15 +152,17 @@ class MPM:
     def reset(self):
         self.gravity[None] = self.initial_gravity
         for i in range(self.n_particles):
-            radius = self.radius * ti.sqrt(ti.random())
+            index = i // self.group_size
+            radius = self.initial_radii[index] * ti.sqrt(ti.random())
+            x = self.initial_positions[index][0]
+            y = self.initial_positions[index][1]
             self.position[i] = [
-                radius * (ti.sin(self.thetas[i])) + 0.5,
-                radius * (ti.cos(self.thetas[i])) + 0.5,
-                # radius * (ti.cos(thetas[i])) + 1.0 - (R + 0.01),
+                radius * (ti.sin(self.thetas[i % self.group_size])) + x,
+                radius * (ti.cos(self.thetas[i % self.group_size])) + y,
             ]
+            self.velocity[i] = self.initial_velocities[index]
             self.F[i] = ti.Matrix([[1, 0], [0, 1]])
             self.C[i] = ti.Matrix.zero(float, 2, 2)
-            self.velocity[i] = self.initial_velocity
             self.Jp[i] = 1
 
 

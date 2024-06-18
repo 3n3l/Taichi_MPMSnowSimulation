@@ -10,10 +10,9 @@ def main():
     mpm = MPM(
         quality=3,
         initial_gravity=[0, -9.8],
-        attractor_active=True,
-        initial_positions=np.array([[0.5, 0.5]], dtype=np.float32),
-        initial_velocities=np.array([[0, 0]], dtype=np.float32),
-        initial_radii=np.array([0.04], dtype=np.float32),
+        initial_positions=np.array([[0.05, 0.49], [0.95, 0.51]], dtype=np.float32),
+        initial_velocities=np.array([[5, 0], [-5, 0]], dtype=np.float32),
+        initial_radii=np.array([0.04, 0.04], dtype=np.float32),
     )
     mpm.run()
 
