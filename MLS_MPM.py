@@ -63,7 +63,7 @@ class MPM:
         self.thetas.from_numpy(t)
         self.initial_velocity = initial_velocity
         self.initial_gravity = initial_gravity
-        self.attractor_active = attractor_active
+        self.attractor_is_active = attractor_active
         self.radius = radius
 
 
@@ -177,7 +177,7 @@ class MPM:
                 elif gui.event.key in [ti.GUI.ESCAPE, ti.GUI.EXIT]:
                     break
 
-            if self.attractor_active:
+            if self.attractor_is_active:
                 # Control attractor
                 mouse = gui.get_cursor_pos()
                 self.attractor_strength[None] = 0
