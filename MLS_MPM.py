@@ -166,7 +166,7 @@ class MPM:
 
     def run(self):
         # print("[Hint] Use left/right mouse buttons to attract/repel and start the simulation. Press R to reset.")
-        gui = ti.GUI("Snowball MLS-MPM", res=512, background_color=0x112F41)
+        gui = ti.GUI("Snowball MLS-MPM", res=512, background_color=0x0E1018)
         self.reset()
 
         for _ in range(20_000):
