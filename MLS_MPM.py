@@ -153,13 +153,11 @@ class MPM:
         self.gravity[None] = self.initial_gravity
         for i in range(self.n_particles):
             index = i // self.group_size
+            position = self.initial_positions[index]
             radius = self.initial_radii[index] * ti.sqrt(ti.random())
-            x = self.initial_positions[index][0]
-            y = self.initial_positions[index][1]
-            self.position[i] = [
-                radius * (ti.sin(self.thetas[i % self.group_size])) + x,
-                radius * (ti.cos(self.thetas[i % self.group_size])) + y,
-            ]
+            x = (radius * (ti.sin(self.thetas[i % self.group_size]))) + position[0]
+            y = (radius * (ti.cos(self.thetas[i % self.group_size]))) + position[1]
+            self.position[i] = [x, y]
             self.velocity[i] = self.initial_velocities[index]
             self.F[i] = ti.Matrix([[1, 0], [0, 1]])
             self.C[i] = ti.Matrix.zero(float, 2, 2)
