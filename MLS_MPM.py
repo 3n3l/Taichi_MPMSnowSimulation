@@ -6,19 +6,19 @@ import numpy as np
 class MPM:
     def __init__(
         self,
-        E = 1.4e5,                  # Young's modulus (1.4e5)
-        nu = 0.2,                   # Poisson's ratio (0.2)
-        zeta = 10,                  # Hardening coefficient (10)
-        theta_c = 2.5e-2,           # Critical compression (2.5e-2)
-        theta_s = 7.5e-3,           # Critical stretch (7.5e-3)
-        rho_0 = 4e2 ,               # Initial density (4e2)
-        sticky = 0.5,               # The lower, the stickier the border
-        quality = 1,                # Use a larger value for higher-res simulations
-        initial_gravity = [0, 0],   # Gravity of the simulation ([0, 0])
-        attractor_active = False,   # Enables mouse controlled attractor (False)
-        initial_velocities = np.array([[0, 0]], dtype=np.float32),
-        initial_positions = np.array([[0, 0]], dtype=np.float32),
-        initial_radii = np.array([0.5], dtype=np.float32),
+        E=1.4e5,  # Young's modulus (1.4e5)
+        nu=0.2,  # Poisson's ratio (0.2)
+        zeta=10,  # Hardening coefficient (10)
+        theta_c=2.5e-2,  # Critical compression (2.5e-2)
+        theta_s=7.5e-3,  # Critical stretch (7.5e-3)
+        rho_0=4e2,  # Initial density (4e2)
+        sticky=0.5,  # The lower, the stickier the border
+        quality=1,  # Use a larger value for higher-res simulations
+        initial_gravity=[0, 0],  # Gravity of the simulation ([0, 0])
+        attractor_active=False,  # Enables mouse controlled attractor (False)
+        initial_velocities=np.array([[0, 0]], dtype=np.float32),
+        initial_positions=np.array([[0, 0]], dtype=np.float32),
+        initial_radii=np.array([0.5], dtype=np.float32),
     ):
         # Parameters starting points for MPM
         self.E = E
@@ -27,13 +27,12 @@ class MPM:
         self.theta_c = theta_c
         self.theta_s = theta_s
         self.rho_0 = rho_0
-        self.mu_0 = E / (2 * (1 + nu))                      # Lame parameters
+        self.mu_0 = E / (2 * (1 + nu))  # Lame parameters
         self.lambda_0 = E * nu / ((1 + nu) * (1 - 2 * nu))  # Lame parameters
- 
 
         # Parameters to control the simulation
         self.quality = quality
-        self.n_particles = 1_000 * (quality ** 2)
+        self.n_particles = 1_000 * (quality**2)
         self.n_grid = 128 * quality
         self.dx = 1 / self.n_grid
         self.inv_dx = float(self.n_grid)
@@ -54,17 +53,16 @@ class MPM:
         self.initial_radii.from_numpy(initial_radii)
 
         # Fields
-        self.position = ti.Vector.field(2, dtype=float, shape=self.n_particles)             # position
-        self.velocity = ti.Vector.field(2, dtype=float, shape=self.n_particles)             # velocity
-        self.C = ti.Matrix.field(2, 2, dtype=float, shape=self.n_particles)                 # affine velocity field
-        self.F = ti.Matrix.field(2, 2, dtype=float, shape=self.n_particles)                 # deformation gradient
-        self.Jp = ti.field(dtype=float, shape=self.n_particles)                             # plastic deformation
+        self.position = ti.Vector.field(2, dtype=float, shape=self.n_particles)  # position
+        self.velocity = ti.Vector.field(2, dtype=float, shape=self.n_particles)  # velocity
+        self.C = ti.Matrix.field(2, 2, dtype=float, shape=self.n_particles)  # affine velocity field
+        self.F = ti.Matrix.field(2, 2, dtype=float, shape=self.n_particles)  # deformation gradient
+        self.Jp = ti.field(dtype=float, shape=self.n_particles)  # plastic deformation
         self.grid_velo = ti.Vector.field(2, dtype=float, shape=(self.n_grid, self.n_grid))  # grid node momentum/velocity
-        self.grid_mass = ti.field(dtype=float, shape=(self.n_grid, self.n_grid))            # grid node mass
+        self.grid_mass = ti.field(dtype=float, shape=(self.n_grid, self.n_grid))  # grid node mass
         self.gravity = ti.Vector.field(2, dtype=float, shape=())
         self.attractor_strength = ti.field(dtype=float, shape=())
         self.attractor_pos = ti.Vector.field(2, dtype=float, shape=())
-
 
     @ti.kernel
     def reset_grids(self):
@@ -96,7 +94,9 @@ class MPM:
                 J *= singular_value
             # Reconstruct elastic deformation gradient after plasticity
             self.F[p] = U @ sigma @ V.transpose()
-            stress = 2 * mu * (self.F[p] - U @ V.transpose()) @ self.F[p].transpose() + ti.Matrix.identity(float, 2) * la * J * (J - 1)
+            stress = 2 * mu * (self.F[p] - U @ V.transpose()) @ self.F[
+                p
+            ].transpose() + ti.Matrix.identity(float, 2) * la * J * (J - 1)
             stress = (-self.dt * self.p_vol * 4 * self.inv_dx * self.inv_dx) * stress
             affine = stress + self.p_mass * self.C[p]
             for i, j in ti.static(ti.ndrange(3, 3)):
@@ -104,7 +104,8 @@ class MPM:
                 offset = ti.Vector([i, j])
                 dpos = (offset.cast(float) - fx) * self.dx
                 weight = w[i][0] * w[j][1]
-                self.grid_velo[base + offset] += weight * (self.p_mass * self.velocity[p] + affine @ dpos)
+                v = self.p_mass * self.velocity[p] + affine @ dpos
+                self.grid_velo[base + offset] += weight * v
                 self.grid_mass[base + offset] += weight * self.p_mass
 
     @ti.kernel
@@ -114,7 +115,8 @@ class MPM:
                 self.grid_velo[i, j] = (1 / self.grid_mass[i, j]) * self.grid_velo[i, j]
                 self.grid_velo[i, j] += self.dt * self.gravity[None]  # gravity
                 dist = self.attractor_pos[None] - self.dx * ti.Vector([i, j])
-                self.grid_velo[i, j] += dist / (0.01 + dist.norm()) * self.attractor_strength[None] * self.dt * 100
+                attr = self.attractor_strength[None]
+                self.grid_velo[i, j] += (dist / (0.01 + dist.norm()) * attr * self.dt * 100)
                 # Boundary conditions for the grid velocities
                 collision_left = i < 3 and self.grid_velo[i, j][0] < 0
                 collision_right = i > (self.n_grid - 3) and self.grid_velo[i, j][0] > 0
@@ -127,7 +129,6 @@ class MPM:
                     self.grid_velo[i, j][1] *= self.sticky
                     self.grid_velo[i, j][0] = 0
                 # ^ this should be the other way round, but works better this way?!
-
 
     @ti.kernel
     def grid_to_particle(self):
@@ -147,7 +148,6 @@ class MPM:
             self.velocity[p], self.C[p] = new_v, new_C
             self.position[p] += self.dt * new_v  # advection
 
-
     @ti.kernel
     def reset(self):
         self.gravity[None] = self.initial_gravity
@@ -163,7 +163,6 @@ class MPM:
             self.C[i] = ti.Matrix.zero(float, 2, 2)
             self.Jp[i] = 1
 
-
     def run(self):
         # print("[Hint] Use left/right mouse buttons to attract/repel and start the simulation. Press R to reset.")
         gui = ti.GUI("Snowball MLS-MPM", res=512, background_color=0x0E1018)
@@ -176,8 +175,7 @@ class MPM:
                 elif gui.event.key in [ti.GUI.ESCAPE, ti.GUI.EXIT]:
                     break
 
-            if self.attractor_is_active:
-                # Control attractor
+            if self.attractor_is_active: # Control attractor
                 mouse = gui.get_cursor_pos()
                 self.attractor_strength[None] = 0
                 if gui.is_pressed(ti.GUI.LMB):
@@ -198,4 +196,4 @@ class MPM:
                 self.grid_to_particle()
 
             gui.circles(self.position.to_numpy(), radius=1)
-            gui.show() # change to gui.show(f'{frame:06d}.png') to write images to disk
+            gui.show()  # change to gui.show(f'{frame:06d}.png') to write images to disk
