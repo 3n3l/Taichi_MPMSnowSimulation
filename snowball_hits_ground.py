@@ -1,4 +1,4 @@
-from MLS_MPM import MPM, Snowball
+from MLS_MPM import MPM
 import taichi as ti
 import numpy as np
 
