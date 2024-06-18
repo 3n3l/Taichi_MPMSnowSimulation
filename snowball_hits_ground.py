@@ -2,6 +2,7 @@ from MLS_MPM import MPM
 import taichi as ti
 import numpy as np
 
+
 ti.init(arch=ti.gpu)  # Try to run on GPU
 
 
