@@ -2,11 +2,15 @@ import taichi as ti
 import numpy as np
 
 
+ti.init(arch=ti.vulkan)
+
+
 @ti.data_oriented
 class MPM:
     def __init__(
         self,
-        gui=ti.GUI(), # The gui which displays the simulation
+        # window=ti.ui.Window(name="MLS-MPM", res=(512, 512)), # The window which displays the simulation
+        window:ti.ui.Window, # The window which displays the simulation
         E=1.4e5,  # Young's modulus (1.4e5)
         nu=0.2,  # Poisson's ratio (0.2)
         zeta=10,  # Hardening coefficient (10)
@@ -32,7 +36,9 @@ class MPM:
         self.lambda_0 = E * nu / ((1 + nu) * (1 - 2 * nu))  # Lame parameters
 
         # Parameters to control the simulation
-        self.gui = gui
+        self.window = window
+        self.canvas = window.get_canvas()
+        self.gui = window.get_gui()
         self.quality = quality
         self.n_particles = 1_000 * (quality**2)
         self.n_grid = 128 * quality
@@ -167,26 +173,33 @@ class MPM:
 
     def run(self):
         self.reset()
-        for _ in range(20_000):
-            if self.gui.get_event(ti.GUI.PRESS):
-                if self.gui.event.key == "r":
+        while self.window.running:
+            if self.window.get_event(ti.ui.PRESS):
+                if self.window.event.key == "r":
                     self.reset()
-                elif self.gui.event.key in [ti.GUI.ESCAPE, ti.GUI.EXIT]:
+                elif self.window.event.key in [ti.GUI.ESCAPE, ti.GUI.EXIT]:
                     break
 
-            if self.attractor_is_active: # Control attractor
-                mouse = self.gui.get_cursor_pos()
+            if self.attractor_is_active:
+                mouse = self.window.get_cursor_pos()
                 self.attractor_strength[None] = 0
-                if self.gui.is_pressed(ti.GUI.LMB):
-                    self.gui.circle((mouse[0], mouse[1]), color=0x336699, radius=10)
+                if self.window.is_pressed(ti.GUI.LMB):
                     self.attractor_pos[None] = [mouse[0], mouse[1]]
                     self.gravity[None] = self.initial_gravity
                     self.attractor_strength[None] = 1
-                if self.gui.is_pressed(ti.GUI.RMB):
-                    self.gui.circle((mouse[0], mouse[1]), color=0x336699, radius=10)
+                if self.window.is_pressed(ti.GUI.RMB):
                     self.attractor_pos[None] = [mouse[0], mouse[1]]
                     self.gravity[None] = self.initial_gravity
                     self.attractor_strength[None] = -1
+
+            with self.gui.sub_window("MPM-Presets", 0.01, 0.01, 0.98, 0.5) as w:
+                self.E = w.slider_float(text="E", old_value=self.E, minimum=4.8e4, maximum=4.8e5)
+                self.nu = w.slider_float(text="nu", old_value=self.nu, minimum=0, maximum=1)
+                self.zeta = w.slider_float(text="zeta", old_value=self.zeta, minimum=0, maximum=20)
+                self.theta_c = w.slider_float(text="theta_c", old_value=self.theta_c, minimum=0, maximum=5e-2)
+                self.theta_s = w.slider_float(text="theta_s", old_value=self.theta_s, minimum=0, maximum=15e-3)
+                self.rho_0 = w.slider_float(text="rho_0", old_value=self.rho_0, minimum=0, maximum=4e2)
+                self.sticky = w.slider_float(text="sticky", old_value=self.sticky, minimum=0, maximum=1)
 
             for _ in range(int(2e-3 // self.dt)):
                 self.reset_grids()
@@ -194,5 +207,6 @@ class MPM:
                 self.momentum_to_velocity()
                 self.grid_to_particle()
 
-            self.gui.circles(self.position.to_numpy(), radius=1)
-            self.gui.show()  # change to gui.show(f'{frame:06d}.png') to write images to disk
+            self.canvas.set_background_color((0.054, 0.06, 0.09))
+            self.canvas.circles(centers=self.position, radius=0.002, color=(1, 1, 1))
+            self.window.show()  # change to ...show(f'{frame:06d}.png') to write images to disk

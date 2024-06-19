@@ -8,9 +8,9 @@ ti.init(arch=ti.gpu)  # Try to run on GPU
 
 def main():
     print("[Hint] Press R to reset.")
-    gui = ti.GUI("Snowball hits wall", res=512, background_color=0x0E1018)
+    window = ti.ui.Window(name="Snowball hits wall", res=(512, 512))
     mpm = MPM(
-        gui=gui,
+        window=window,
         quality=3,
         initial_gravity=[0, -9.8],
         initial_positions=np.array([[0.5, 0.5]], dtype=np.float32),

@@ -3,14 +3,11 @@ import taichi as ti
 import numpy as np
 
 
-ti.init(arch=ti.gpu)  # Try to run on GPU
-
-
 def main():
     print("[Hint] Press R to reset.")
-    gui = ti.GUI("Snowball hits snowball", res=512, background_color=0x0E1018)
+    window = ti.ui.Window(name="Snowball hits snowball", res=(512, 512))
     mpm = MPM(
-        gui=gui,
+        window=window,
         E=1.4e5,  # Young's modulus (1.4e5)
         nu=0.2,  # Poisson's ratio (0.2)
         zeta=10,  # Hardening coefficient (10)
@@ -22,7 +19,7 @@ def main():
         initial_gravity=[0, -9.8],
         initial_positions=np.array([[0.05, 0.595], [0.95, 0.615]], dtype=np.float32),
         initial_velocities=np.array([[3, 0], [-3, 0]], dtype=np.float32),
-        initial_radii=np.array([0.04, 0.04], dtype=np.float32),
+        initial_radii=np.array([0.1, 0.1], dtype=np.float32),
     )
     mpm.run()
 

@@ -8,9 +8,9 @@ ti.init(arch=ti.gpu)  # Try to run on GPU
 
 def main():
     print("[Hint] Use left/right mouse buttons to attract/repel and start the simulation. Press R to reset.")
-    gui = ti.GUI("Attractor", res=512, background_color=0x0E1018)
+    window = ti.ui.Window(name="Attractor", res=(512, 512))
     mpm = MPM(
-        gui=gui,
+        window=window,
         quality=3,
         initial_gravity=[0, -9.8],
         attractor_active=True,
