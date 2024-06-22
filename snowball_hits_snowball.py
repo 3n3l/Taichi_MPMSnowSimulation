@@ -20,9 +20,9 @@ def main():
         sticky=0.5,  # The lower, the stickier the border
         quality=3,  # Use a larger value for higher-res simulations
         initial_gravity=[0, -9.8],
-        initial_positions=np.array([[0.05, 0.595], [0.95, 0.615]], dtype=np.float32),
-        initial_velocities=np.array([[3, 0], [-3, 0]], dtype=np.float32),
-        initial_radii=np.array([0.04, 0.04], dtype=np.float32),
+        initial_positions=np.array([[0.05, 0.595], [0.93, 0.615]], dtype=np.float32),
+        initial_velocities=np.array([[5, 0], [-3, 0]], dtype=np.float32),
+        initial_radii=np.array([0.04, 0.05], dtype=np.float32),
     )
     mpm.run()
 

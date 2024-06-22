@@ -167,7 +167,7 @@ class MPM:
 
     def run(self):
         self.reset()
-        for _ in range(20_000):
+        for frame in range(20_000):
             if self.gui.get_event(ti.GUI.PRESS):
                 if self.gui.event.key == "r":
                     self.reset()
@@ -194,5 +194,5 @@ class MPM:
                 self.momentum_to_velocity()
                 self.grid_to_particle()
 
-            self.gui.circles(self.position.to_numpy(), radius=1)
-            self.gui.show()  # change to gui.show(f'{frame:06d}.png') to write images to disk
+            self.gui.circles(self.position.to_numpy(), radius=1.25)
+            self.gui.show(f'{frame:06d}.png')  # change to gui.show(f'{frame:06d}.png') to write images to disk
