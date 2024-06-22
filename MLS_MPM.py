@@ -1,3 +1,4 @@
+from numpy._typing import NDArray
 import taichi as ti
 import numpy as np
 
@@ -6,10 +7,33 @@ ti.init(arch=ti.vulkan)
 
 
 @ti.data_oriented
+class Configuration:
+    def __init__(
+        self,
+        velocity: np.ndarray,
+        position: np.ndarray,
+        n_particles: int,
+        quality: int,
+        name: str,
+     ):
+        n = position.shape[0]
+        m = velocity.shape[0]
+        assert n == m, "Positions and velocities shape not matching!"
+
+        self.name = name
+        self.quality = quality
+        self.n_particles = n_particles
+        self.group_size = position.shape[0]
+        self.velocity = ti.Vector.field(n=2, dtype=float, shape=velocity.shape[0])
+        self.position = ti.Vector.field(n=2, dtype=float, shape=position.shape[0])
+        self.velocity.from_numpy(velocity)
+        self.position.from_numpy(position)
+
+@ti.data_oriented
 class MPM:
     def __init__(
         self,
-        # window=ti.ui.Window(name="MLS-MPM", res=(512, 512)), # The window which displays the simulation
+        configurations: list[Configuration],
         window:ti.ui.Window, # The window which displays the simulation
         E=1.4e5,  # Young's modulus (1.4e5)
         nu=0.2,  # Poisson's ratio (0.2)
@@ -19,11 +43,9 @@ class MPM:
         rho_0=4e2,  # Initial density (4e2)
         sticky=0.5,  # The lower, the stickier the border
         quality=1,  # Use a larger value for higher-res simulations
+        n_particles=10_000,
         initial_gravity=[0, 0],  # Gravity of the simulation ([0, 0])
         attractor_active=False,  # Enables mouse controlled attractor (False)
-        initial_velocities=np.array([[0, 0]], dtype=np.float32),
-        initial_positions=np.array([[0, 0]], dtype=np.float32),
-        initial_radii=np.array([0.5], dtype=np.float32),
     ):
         # Parameters starting points for MPM
         self.E = E
@@ -35,37 +57,33 @@ class MPM:
         self.mu_0 = E / (2 * (1 + nu))  # Lame parameters
         self.lambda_0 = E * nu / ((1 + nu) * (1 - 2 * nu))  # Lame parameters
 
+        self.paused = False
+        self.configuration_id = 0
+        self.configurations = configurations
+        self.configuration = configurations[self.configuration_id]
+
         # Parameters to control the simulation
         self.window = window
         self.canvas = window.get_canvas()
         self.gui = window.get_gui()
         self.quality = quality
-        self.n_particles = 1_000 * (quality**2)
-        self.n_grid = 128 * quality
+        self.n_particles = n_particles
+        self.n_grid = 128 * self.quality
         self.dx = 1 / self.n_grid
         self.inv_dx = float(self.n_grid)
-        self.dt = 1e-4 / self.quality
+        self.dt = 1e-4 / self.configuration.quality
         self.p_vol = (self.dx * 0.5) ** 2
         self.p_mass = self.p_vol * rho_0
         self.sticky = sticky
         self.initial_gravity = initial_gravity
         self.attractor_is_active = attractor_active
-        self.group_size = self.n_particles // initial_radii.shape[0]
-        self.thetas = ti.field(dtype=float, shape=self.group_size)  # used to parametrize the snowball
-        self.thetas.from_numpy(np.linspace(0, 2 * np.pi, self.group_size + 2, dtype=np.float32)[1:-1])
-        self.initial_velocities = ti.Vector.field(n=2, dtype=float, shape=initial_velocities.shape[0])
-        self.initial_positions = ti.Vector.field(n=2, dtype=float, shape=initial_positions.shape[0])
-        self.initial_radii = ti.field(dtype=float, shape=initial_radii.shape[0])
-        self.initial_velocities.from_numpy(initial_velocities)
-        self.initial_positions.from_numpy(initial_positions)
-        self.initial_radii.from_numpy(initial_radii)
 
         # Fields
-        self.position = ti.Vector.field(2, dtype=float, shape=self.n_particles)  # position
-        self.velocity = ti.Vector.field(2, dtype=float, shape=self.n_particles)  # velocity
-        self.C = ti.Matrix.field(2, 2, dtype=float, shape=self.n_particles)  # affine velocity field
-        self.F = ti.Matrix.field(2, 2, dtype=float, shape=self.n_particles)  # deformation gradient
-        self.Jp = ti.field(dtype=float, shape=self.n_particles)  # plastic deformation
+        self.position = ti.Vector.field(2, dtype=float, shape=self.configuration.n_particles)  # position
+        self.velocity = ti.Vector.field(2, dtype=float, shape=self.configuration.n_particles)  # velocity
+        self.C = ti.Matrix.field(2, 2, dtype=float, shape=self.configuration.n_particles)  # affine velocity field
+        self.F = ti.Matrix.field(2, 2, dtype=float, shape=self.configuration.n_particles)  # deformation gradient
+        self.Jp = ti.field(dtype=float, shape=self.configuration.n_particles)  # plastic deformation
         self.grid_velo = ti.Vector.field(2, dtype=float, shape=(self.n_grid, self.n_grid))  # grid node momentum/velocity
         self.grid_mass = ti.field(dtype=float, shape=(self.n_grid, self.n_grid))  # grid node mass
         self.gravity = ti.Vector.field(2, dtype=float, shape=())
@@ -102,9 +120,7 @@ class MPM:
                 J *= singular_value
             # Reconstruct elastic deformation gradient after plasticity
             self.F[p] = U @ sigma @ V.transpose()
-            stress = 2 * mu * (self.F[p] - U @ V.transpose()) @ self.F[
-                p
-            ].transpose() + ti.Matrix.identity(float, 2) * la * J * (J - 1)
+            stress = 2 * mu * (self.F[p] - U @ V.transpose()) @ self.F[p].transpose() + ti.Matrix.identity(float, 2) * la * J * (J - 1)
             stress = (-self.dt * self.p_vol * 4 * self.inv_dx * self.inv_dx) * stress
             affine = stress + self.p_mass * self.C[p]
             for i, j in ti.static(ti.ndrange(3, 3)):
@@ -129,14 +145,13 @@ class MPM:
                 collision_left = i < 3 and self.grid_velo[i, j][0] < 0
                 collision_right = i > (self.n_grid - 3) and self.grid_velo[i, j][0] > 0
                 if collision_left or collision_right:
-                    self.grid_velo[i, j][1] = 0
-                    self.grid_velo[i, j][0] *= self.sticky
+                    self.grid_velo[i, j][0] = 0
+                    self.grid_velo[i, j][1] *= self.sticky
                 collision_top = j < 3 and self.grid_velo[i, j][1] < 0
                 collision_bottom = j > (self.n_grid - 3) and self.grid_velo[i, j][1] > 0
                 if collision_top or collision_bottom:
-                    self.grid_velo[i, j][1] *= self.sticky
-                    self.grid_velo[i, j][0] = 0
-                # ^ this should be the other way round, but works better this way?!
+                    self.grid_velo[i, j][0] *= self.sticky
+                    self.grid_velo[i, j][1] = 0
 
     @ti.kernel
     def grid_to_particle(self):
@@ -157,26 +172,23 @@ class MPM:
             self.position[p] += self.dt * new_v  # advection
 
     @ti.kernel
-    def reset(self):
+    def reset(self, configuration_id: int):
         self.gravity[None] = self.initial_gravity
-        for i in range(self.n_particles):
-            index = i // self.group_size
-            position = self.initial_positions[index]
-            radius = self.initial_radii[index] * ti.sqrt(ti.random())
-            x = (radius * (ti.sin(self.thetas[i % self.group_size]))) + position[0]
-            y = (radius * (ti.cos(self.thetas[i % self.group_size]))) + position[1]
-            self.position[i] = [x, y]
-            self.velocity[i] = self.initial_velocities[index]
+        configuration = self.configurations[int(configuration_id)]
+        for i in range(self.configuration.n_particles):
+            self.position[i] = configuration.position[i]
+            self.velocity[i] = configuration.velocity[i]
             self.F[i] = ti.Matrix([[1, 0], [0, 1]])
             self.C[i] = ti.Matrix.zero(float, 2, 2)
             self.Jp[i] = 1
 
     def run(self):
-        self.reset()
+        self.reset(self.configuration_id)
+
         while self.window.running:
             if self.window.get_event(ti.ui.PRESS):
                 if self.window.event.key == "r":
-                    self.reset()
+                    self.reset(self.configuration_id)
                 elif self.window.event.key in [ti.GUI.ESCAPE, ti.GUI.EXIT]:
                     break
 
@@ -192,7 +204,23 @@ class MPM:
                     self.gravity[None] = self.initial_gravity
                     self.attractor_strength[None] = -1
 
-            with self.gui.sub_window("MPM-Presets", 0.01, 0.01, 0.98, 0.5) as w:
+            # print(self.position)
+            print(self.velocity)
+            conf = self.configurations[self.configuration_id]
+            print("=" * 111)
+            print(conf.name)
+            print(self.velocity)
+            print(conf.velocity)
+            print("=" * 111)
+            if not self.paused:
+                for _ in range(int(2e-3 // self.dt)):
+                    self.reset_grids()
+                    self.particle_to_grid()
+                    self.momentum_to_velocity()
+                    self.grid_to_particle()
+
+            with self.gui.sub_window("Settings", 0.01, 0.01, 0.98, 0.5) as w:
+                # MPM parameters
                 self.E = w.slider_float(text="E", old_value=self.E, minimum=4.8e4, maximum=4.8e5)
                 self.nu = w.slider_float(text="nu", old_value=self.nu, minimum=0, maximum=1)
                 self.zeta = w.slider_float(text="zeta", old_value=self.zeta, minimum=0, maximum=20)
@@ -200,13 +228,89 @@ class MPM:
                 self.theta_s = w.slider_float(text="theta_s", old_value=self.theta_s, minimum=0, maximum=15e-3)
                 self.rho_0 = w.slider_float(text="rho_0", old_value=self.rho_0, minimum=0, maximum=4e2)
                 self.sticky = w.slider_float(text="sticky", old_value=self.sticky, minimum=0, maximum=1)
-
-            for _ in range(int(2e-3 // self.dt)):
-                self.reset_grids()
-                self.particle_to_grid()
-                self.momentum_to_velocity()
-                self.grid_to_particle()
+                # Presets
+                prev_configuration_id = self.configuration_id
+                for i in range(len(self.configurations)):
+                    name = self.configurations[i].name
+                    if w.checkbox(name, self.configuration_id == i):
+                        # self.configuration = self.configurations[i]
+                        self.configuration_id = i
+                if self.configuration_id != prev_configuration_id:
+                    # print(self.configurations[self.configuration_id].position)
+                    # print(self.configurations[self.configuration_id].velocity)
+                    self.reset(self.configuration_id)
+                #     self.paused = True
+                # if self.paused:
+                #     if w.button("Continue"):
+                #         self.paused = False
+                # else:
+                #     if w.button("Pause"):
+                #         self.paused = True
 
             self.canvas.set_background_color((0.054, 0.06, 0.09))
-            self.canvas.circles(centers=self.position, radius=0.002, color=(1, 1, 1))
+            self.canvas.circles(centers=self.position, radius=0.0012, color=(1, 1, 1))
             self.window.show()  # change to ...show(f'{frame:06d}.png') to write images to disk
+
+def snowball_positions(position=[[0,0]], n_particles=1000, radius=1.0):
+    n_snowballs = len(position)
+    group_size = n_particles // n_snowballs
+    p = np.zeros(shape=(n_particles, 2), dtype=np.float32)
+    thetas = np.linspace(0, 2 * np.pi, group_size + 2, dtype=np.float32)[1:-1]
+    r = radius * np.sqrt(np.random.rand(n_particles))
+    for i in range(n_particles):
+        j = i // group_size
+        p[i, 0] = (r[i] * np.sin(thetas[i % group_size])) + position[j][0]
+        p[i, 1] = (r[i] * np.cos(thetas[i % group_size])) + position[j][1]
+    return p
+
+def snowball_velocities(velocity=[[0,0]], n_particles=1000):
+    n_snowballs = len(velocity)
+    group_size = n_particles // n_snowballs
+    v = np.zeros(shape=(n_particles, 2), dtype=np.float32)
+    for i in range(n_particles):
+        j = i // group_size
+        v[i, 0] = velocity[j][0]
+        v[i, 1] = velocity[j][1]
+    return v
+
+def main():
+    print("[Hint] Press R to reset.")
+
+    quality = 3
+    radius = 0.05
+    n_particles = 2_000 * (quality**2)
+    window = ti.ui.Window(name="MLS-MPM", res=(512, 512), fps_limit=60)
+    mpm = MPM(
+        window=window,
+        quality=quality,
+        n_particles=n_particles,
+        initial_gravity=[0, -9.8],
+        configurations = [
+            Configuration(
+                name="Snowball hits wall",
+                quality=quality,
+                n_particles=n_particles, 
+                position=snowball_positions([[0.5, 0.5]], radius=radius, n_particles=n_particles),
+                velocity=snowball_velocities([[5, 0]], n_particles=n_particles),
+            ),
+            Configuration(
+                name="Snowball hits ground",
+                quality=quality,
+                n_particles=n_particles, 
+                position=snowball_positions([[0.5, 0.5]], radius=radius, n_particles=n_particles),
+                velocity=snowball_velocities([[0, 0]], n_particles=n_particles),
+            ),
+            Configuration(
+                name="Snowball hits snowball",
+                quality=quality,
+                n_particles=n_particles, 
+                position=snowball_positions([[0.06, 0.595], [0.94, 0.615]], radius=radius, n_particles=n_particles),
+                velocity=snowball_velocities([[3, 0], [-3, 0]], n_particles=n_particles),
+            ),
+        ]
+    )
+    mpm.run()
+
+
+if __name__ == "__main__":
+    main()
