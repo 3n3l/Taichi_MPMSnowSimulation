@@ -88,15 +88,15 @@ def main():
     ]
 
     print("-" * 150)
+    configuration_help = "\n".join([f"{i}: {c.name}" for i, c in enumerate(configurations)])
     p_epilog = "[Hint] Press R to reset, SPACE to pause/unpause the simulation!"
-    parser = ArgumentParser(prog="main.py", epilog=p_epilog, formatter_class=RawTextHelpFormatter)
-    s_help = "Show settings in subwindow."
-    parser.add_argument("--showSettings", const=True, default=False, nargs="?", help=s_help)
-    write_help = "Write frames to disk."
-    parser.add_argument("--writeToDisk", const=True, default=False, nargs="?", help=write_help)
-    p_help = "\n".join([f"{i}: {c.name}" for i, c in enumerate(configurations)])
-    parser.add_argument("--configuration", default=0, nargs="?", help=p_help, type=int)
+    settings_help = "Show settings in subwindow."
     paused_help = "Pause the simulation."
+    write_help = "Write frames to disk."
+    parser = ArgumentParser(prog="main.py", epilog=p_epilog, formatter_class=RawTextHelpFormatter)
+    parser.add_argument("--showSettings", const=True, default=False, nargs="?", help=settings_help)
+    parser.add_argument("--writeToDisk", const=True, default=False, nargs="?", help=write_help)
+    parser.add_argument("--configuration", default=0, nargs="?", help=configuration_help, type=int)
     parser.add_argument("--paused", const=True, default=False, nargs="?", help=paused_help)
     args = parser.parse_args()
     parser.print_help()
