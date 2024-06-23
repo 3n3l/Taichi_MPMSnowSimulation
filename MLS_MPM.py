@@ -54,7 +54,10 @@ class MPM:
         self.mu_0 = E / (2 * (1 + nu))  # Lame parameters
         self.lambda_0 = E * nu / ((1 + nu) * (1 - 2 * nu))  # Lame parameters
 
-        self.is_pause = False
+        self.write_to_disk = False
+        self.is_paused = False
+        self.frame = 0  # for writing this to disk
+
         self.configuration_id = 0
         self.configurations = configurations
         self.configuration = configurations[self.configuration_id]
@@ -197,7 +200,7 @@ class MPM:
                 if self.window.event.key == "r":
                     self.reset_fields()
                 elif self.window.event.key in [ti.GUI.SPACE, "p"]:
-                    self.is_pause = not self.is_pause
+                    self.is_paused = not self.is_paused
                 elif self.window.event.key in [ti.GUI.ESCAPE, ti.GUI.EXIT]:
                     break
 
@@ -213,7 +216,7 @@ class MPM:
                     self.gravity[None] = self.initial_gravity
                     self.attractor_strength[None] = -1
 
-            if not self.is_pause:
+            if not self.is_paused:
                 for _ in range(int(2e-3 // self.dt)):
                     self.reset_grids()
                     self.particle_to_grid()
@@ -238,16 +241,27 @@ class MPM:
                 if self.configuration_id != prev_configuration_id:
                     self.initialize_simulation()
                     self.reset_fields()
-                    self.is_pause = True
-                if self.is_pause:
+                    self.is_paused = True
+                # Pause/Unpause
+                if self.is_paused:
                     if w.button("Continue"):
-                        self.is_pause = False
+                        self.is_paused = False
                 else:
                     if w.button("Pause"):
-                        self.is_pause = True
+                        self.is_paused = True
+                # Write to disk
+                if self.write_to_disk:
+                    if w.button("Stop recording"):
+                        self.write_to_disk = False
+                else:
+                    if w.button("Start recording"):
+                        self.write_to_disk = True
 
             self.canvas.set_background_color((0.054, 0.06, 0.09))
             self.canvas.circles(centers=self.position, radius=0.0012, color=(1, 1, 1))
+            if self.write_to_disk:
+                self.window.save_image(f'{self.frame:06d}.png')
+                self.frame += 1
             self.window.show()  # change to ...show(f'{frame:06d}.png') to write images to disk
 
 def snowball_positions(position=[[0,0]], n_particles=1000, radius=1.0):
