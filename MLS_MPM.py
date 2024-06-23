@@ -54,7 +54,7 @@ class MPM:
         self.mu_0 = E / (2 * (1 + nu))  # Lame parameters
         self.lambda_0 = E * nu / ((1 + nu) * (1 - 2 * nu))  # Lame parameters
 
-        self.paused = False
+        self.is_pause = False
         self.configuration_id = 0
         self.configurations = configurations
         self.configuration = configurations[self.configuration_id]
@@ -173,7 +173,7 @@ class MPM:
             self.position[p] += self.dt * new_v  # advection
 
     @ti.kernel
-    def reset(self):
+    def reset_fields(self):
         self.gravity[None] = self.initial_gravity
         for i in range(self.configuration.n_particles):
             self.position[i] = self.initial_position[i]
@@ -182,20 +182,22 @@ class MPM:
             self.C[i] = ti.Matrix.zero(float, 2, 2)
             self.Jp[i] = 1
 
-    def initialize(self):
+    def initialize_simulation(self):
         configuration = self.configurations[self.configuration_id]
         self.initial_position.from_numpy(configuration.position)
         self.initial_velocity.from_numpy(configuration.velocity)
 
 
     def run(self):
-        self.initialize()
-        self.reset()
+        self.initialize_simulation()
+        self.reset_fields()
 
         while self.window.running:
             if self.window.get_event(ti.ui.PRESS):
                 if self.window.event.key == "r":
-                    self.reset()
+                    self.reset_fields()
+                elif self.window.event.key in [ti.GUI.SPACE, "p"]:
+                    self.is_pause = not self.is_pause
                 elif self.window.event.key in [ti.GUI.ESCAPE, ti.GUI.EXIT]:
                     break
 
@@ -211,7 +213,7 @@ class MPM:
                     self.gravity[None] = self.initial_gravity
                     self.attractor_strength[None] = -1
 
-            if not self.paused:
+            if not self.is_pause:
                 for _ in range(int(2e-3 // self.dt)):
                     self.reset_grids()
                     self.particle_to_grid()
@@ -232,20 +234,17 @@ class MPM:
                 for i in range(len(self.configurations)):
                     name = self.configurations[i].name
                     if w.checkbox(name, self.configuration_id == i):
-                        # self.configuration = self.configurations[i]
                         self.configuration_id = i
                 if self.configuration_id != prev_configuration_id:
-                    # print(self.configurations[self.configuration_id].position)
-                    # print(self.configurations[self.configuration_id].velocity)
-                    self.initialize()
-                    self.reset()
-                #     self.paused = True
-                # if self.paused:
-                #     if w.button("Continue"):
-                #         self.paused = False
-                # else:
-                #     if w.button("Pause"):
-                #         self.paused = True
+                    self.initialize_simulation()
+                    self.reset_fields()
+                    self.is_pause = True
+                if self.is_pause:
+                    if w.button("Continue"):
+                        self.is_pause = False
+                else:
+                    if w.button("Pause"):
+                        self.is_pause = True
 
             self.canvas.set_background_color((0.054, 0.06, 0.09))
             self.canvas.circles(centers=self.position, radius=0.0012, color=(1, 1, 1))
@@ -280,6 +279,7 @@ def main():
     radius = 0.05
     n_particles = 2_000 * (quality**2)
     window = ti.ui.Window(name="MLS-MPM", res=(512, 512), fps_limit=60)
+    print("[Hint] Generating presets!")
     mpm = MPM(
         window=window,
         quality=quality,
@@ -309,6 +309,7 @@ def main():
             ),
         ]
     )
+    print("[Hint] Starting the simulation!")
     mpm.run()
 
 
