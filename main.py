@@ -41,6 +41,13 @@ def main():
             name="Snowball hits wall",
             quality=quality,
             n_particles=n_particles,
+            E=1.4e5,  # Young's modulus (1.4e5)
+            nu=0.2,  # Poisson's ratio (0.2)
+            zeta=8,  # Hardening coefficient (10)
+            theta_c=2.5e-2,  # Critical compression (2.5e-2)
+            theta_s=7.5e-3,  # Critical stretch (7.5e-3)
+            rho_0=4e2,  # Initial density (4e2)
+            sticky=0.9,  # The lower, the stickier the border
             position=snowball_positions([[0.5, 0.5]], radius=radius, n_particles=n_particles),
             velocity=snowball_velocities([[5, 0]], n_particles=n_particles),
         ),
@@ -48,19 +55,47 @@ def main():
             name="Snowball hits ground",
             quality=quality,
             n_particles=n_particles,
+            E=1.4e5,  # Young's modulus (1.4e5)
+            nu=0.2,  # Poisson's ratio (0.2)
+            zeta=10,  # Hardening coefficient (10)
+            theta_c=2.5e-2,  # Critical compression (2.5e-2)
+            theta_s=4.5e-3,  # Critical stretch (7.5e-3)
+            rho_0=4e2,  # Initial density (4e2)
+            sticky=0.3,  # The lower, the stickier the border
             position=snowball_positions([[0.5, 0.5]], radius=radius, n_particles=n_particles),
             velocity=snowball_velocities([[0, 0]], n_particles=n_particles),
         ),
         Configuration(
-            name="Snowball hits snowball",
+            name="Snowball hits snowball [1]",
             quality=quality,
             n_particles=n_particles,
-            position=snowball_positions([[0.06, 0.595], [0.94, 0.615]], radius=radius, n_particles=n_particles),
-            velocity=snowball_velocities([[3, 0], [-3, 0]], n_particles=n_particles),
+            E=1.4e5,  # Young's modulus (1.4e5)
+            nu=0.2,  # Poisson's ratio (0.2)
+            zeta=8,  # Hardening coefficient (10)
+            theta_c=1.5e-2,  # Critical compression (2.5e-2)
+            theta_s=5.5e-3,  # Critical stretch (7.5e-3)
+            rho_0=4e2,  # Initial density (4e2)
+            sticky=0.5,  # The lower, the stickier the border
+            position=snowball_positions([[0.07, 0.595], [0.91, 0.615]], radius=radius, n_particles=n_particles),
+            velocity=snowball_velocities([[6, 0], [-3, 0]], n_particles=n_particles),
+        ),
+        Configuration(
+            name="Snowball hits snowball [2]",
+            quality=quality,
+            n_particles=n_particles,
+            E=1.4e5,  # Young's modulus (1.4e5)
+            nu=0.2,  # Poisson's ratio (0.2)
+            zeta=5,  # Hardening coefficient (10)
+            theta_c=2.5e-2,  # Critical compression (2.5e-2)
+            theta_s=4.0e-3,  # Critical stretch (7.5e-3)
+            rho_0=4e2,  # Initial density (4e2)
+            sticky=0.5,  # The lower, the stickier the border
+            position=snowball_positions([[0.06, 0.5], [0.94, 0.53]], radius=radius, n_particles=n_particles),
+            velocity=snowball_velocities([[4, 0], [-4, 0]], n_particles=n_particles),
         ),
     ]
 
-    print()
+    print("-" * 150)
     p_epilog = "[Hint] Press R to reset, SPACE to pause/unpause the simulation!"
     parser = ArgumentParser(prog="main.py", epilog=p_epilog, formatter_class=RawTextHelpFormatter)
     s_help = "Show settings in subwindow."
@@ -73,10 +108,9 @@ def main():
     parser.add_argument("--paused", const=True, default=False, nargs="?", help=paused_help)
     args = parser.parse_args()
     parser.print_help()
-    print()
+    print("-" * 150)
 
     mpm = MPM(
-        quality=quality,
         n_particles=n_particles,
         initial_gravity=[0, -9.8],
         should_write_to_disk=args.writeToDisk,

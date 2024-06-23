@@ -7,14 +7,6 @@ class MPM:
     def __init__(
         self,
         configurations: list[Configuration],
-        nu=0.2,  # Poisson's ratio (0.2)
-        E=1.4e5,  # Young's modulus (1.4e5)
-        zeta=10,  # Hardening coefficient (10)
-        rho_0=4e2,  # Initial density (4e2)
-        quality=1,  # Use a larger value for higher-res simulations
-        sticky=0.5,  # The lower, the stickier the border
-        theta_c=2.5e-2,  # Critical compression (2.5e-2)
-        theta_s=7.5e-3,  # Critical stretch (7.5e-3)
         n_particles=10_000,
         initial_gravity=[0, 0],  # Gravity of the simulation ([0, 0])
         is_paused=False,
@@ -22,30 +14,31 @@ class MPM:
         should_show_settings=False,
         should_write_to_disk=False,
     ):
+        configuration = configurations[configuration_id]
         # Parameters starting points for MPM
-        self.E = E
-        self.nu = nu
-        self.zeta = zeta
-        self.theta_c = theta_c
-        self.theta_s = theta_s
-        self.rho_0 = rho_0
-        self.mu_0 = E / (2 * (1 + nu))  # Lame parameters
-        self.lambda_0 = E * nu / ((1 + nu) * (1 - 2 * nu))  # Lame parameters
+        self.E = configuration.E
+        self.nu = configuration.nu
+        self.zeta = configuration.zeta
+        self.theta_c = configuration.theta_c
+        self.theta_s = configuration.theta_s
+        self.rho_0 = configuration.rho_0
+        self.mu_0 = self.E / (2 * (1 + self.nu)) 
+        self.lambda_0 = self.E * self.nu / ((1 + self.nu) * (1 - 2 * self.nu))
 
 
         # Parameters to control the simulation
         self.window = ti.ui.Window(name="MLS-MPM", res=(720, 720), fps_limit=60)
         self.canvas = self.window.get_canvas()
         self.gui = self.window.get_gui()
-        self.quality = quality
+        self.quality = configuration.quality
         self.n_particles = n_particles
         self.n_grid = 128 * self.quality
         self.dx = 1 / self.n_grid
         self.inv_dx = float(self.n_grid)
         self.dt = 1e-4 / self.quality
         self.p_vol = (self.dx * 0.5) ** 2
-        self.p_mass = self.p_vol * rho_0
-        self.sticky = sticky
+        self.p_mass = self.p_vol * self.rho_0
+        self.sticky = configuration.sticky
         self.initial_gravity = initial_gravity
         self.should_show_settings = should_show_settings
         self.should_write_to_disk = should_write_to_disk
@@ -55,7 +48,6 @@ class MPM:
         self.configuration_id = configuration_id
 
         # Fields
-        configuration = configurations[configuration_id]
         self.position = ti.Vector.field(2, dtype=float, shape=configuration.n_particles)  # position
         self.velocity = ti.Vector.field(2, dtype=float, shape=configuration.n_particles)  # velocity
         self.C = ti.Matrix.field(2, 2, dtype=float, shape=configuration.n_particles)  # affine velocity field
