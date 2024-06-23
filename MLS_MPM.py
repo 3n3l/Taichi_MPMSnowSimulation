@@ -1,4 +1,3 @@
-from numpy._typing import NDArray
 import taichi as ti
 import numpy as np
 
@@ -31,7 +30,6 @@ class MPM:
     def __init__(
         self,
         configurations: list[Configuration],
-        window:ti.ui.Window, # The window which displays the simulation
         E=1.4e5,  # Young's modulus (1.4e5)
         nu=0.2,  # Poisson's ratio (0.2)
         zeta=10,  # Hardening coefficient (10)
@@ -66,9 +64,9 @@ class MPM:
         self.initial_velocity.from_numpy(self.configuration.velocity)
 
         # Parameters to control the simulation
-        self.window = window
-        self.canvas = window.get_canvas()
-        self.gui = window.get_gui()
+        self.window = ti.ui.Window(name="MLS-MPM", res=(720, 720), fps_limit=60)
+        self.canvas = self.window.get_canvas()
+        self.gui = self.window.get_gui()
         self.quality = quality
         self.n_particles = n_particles
         self.n_grid = 128 * self.quality
@@ -239,11 +237,11 @@ class MPM:
                         self.write_to_disk = True
 
             self.canvas.set_background_color((0.054, 0.06, 0.09))
-            self.canvas.circles(centers=self.position, radius=0.0012, color=(1, 1, 1))
+            self.canvas.circles(centers=self.position, radius=0.0016, color=(0.8, 0.8, 0.8))
             if self.write_to_disk:
                 self.window.save_image(f'{self.frame:06d}.png')
                 self.frame += 1
-            self.window.show()  # change to ...show(f'{frame:06d}.png') to write images to disk
+            self.window.show()
 
 def snowball_positions(position=[[0,0]], n_particles=1000, radius=1.0):
     n_snowballs = len(position)
@@ -273,10 +271,8 @@ def main():
     quality = 3
     radius = 0.05
     n_particles = 2_000 * (quality**2)
-    window = ti.ui.Window(name="MLS-MPM", res=(512, 512), fps_limit=60)
     print("[Hint] Generating presets!")
     mpm = MPM(
-        window=window,
         quality=quality,
         n_particles=n_particles,
         initial_gravity=[0, -9.8],
