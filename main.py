@@ -65,10 +65,12 @@ def main():
     parser = ArgumentParser(prog="main.py", epilog=p_epilog, formatter_class=RawTextHelpFormatter)
     s_help = "Show settings in subwindow."
     parser.add_argument("--showSettings", const=True, default=False, nargs="?", help=s_help)
-    w_help = "Write frames to disk."
-    parser.add_argument("--writeToDisk", const=True, default=False, nargs="?", help=w_help)
+    write_help = "Write frames to disk."
+    parser.add_argument("--writeToDisk", const=True, default=False, nargs="?", help=write_help)
     p_help = "\n".join([f"{i}: {c.name}" for i, c in enumerate(configurations)])
     parser.add_argument("--configuration", default=0, nargs="?", help=p_help, type=int)
+    paused_help = "Pause the simulation."
+    parser.add_argument("--paused", const=True, default=False, nargs="?", help=paused_help)
     args = parser.parse_args()
     parser.print_help()
     print()
@@ -81,6 +83,7 @@ def main():
         should_show_settings=args.showSettings,
         configuration_id=args.configuration,
         configurations=configurations,
+        is_paused=args.paused,
     )
     mpm.run()
 
