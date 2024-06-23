@@ -8,8 +8,6 @@ class Configuration:
         self,
         velocity: np.ndarray,
         position: np.ndarray,
-        n_particles: int,
-        quality: int,
         name: str,
         nu=0.2,  # Poisson's ratio (0.2)
         E=1.4e5,  # Young's modulus (1.4e5)
@@ -27,8 +25,6 @@ class Configuration:
         self.velocity = velocity
         self.position = position
         self.name = name
-        self.quality = quality
-        self.n_particles = n_particles
         self.nu = nu
         self.E = E
         self.zeta = zeta

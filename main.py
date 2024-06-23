@@ -39,8 +39,6 @@ def main():
     configurations = [
         Configuration(
             name="Snowball hits wall",
-            quality=quality,
-            n_particles=n_particles,
             E=1.4e5,  # Young's modulus (1.4e5)
             nu=0.2,  # Poisson's ratio (0.2)
             zeta=8,  # Hardening coefficient (10)
@@ -53,8 +51,6 @@ def main():
         ),
         Configuration(
             name="Snowball hits ground",
-            quality=quality,
-            n_particles=n_particles,
             E=1.4e5,  # Young's modulus (1.4e5)
             nu=0.2,  # Poisson's ratio (0.2)
             zeta=10,  # Hardening coefficient (10)
@@ -67,8 +63,6 @@ def main():
         ),
         Configuration(
             name="Snowball hits snowball [1]",
-            quality=quality,
-            n_particles=n_particles,
             E=1.4e5,  # Young's modulus (1.4e5)
             nu=0.2,  # Poisson's ratio (0.2)
             zeta=8,  # Hardening coefficient (10)
@@ -81,8 +75,6 @@ def main():
         ),
         Configuration(
             name="Snowball hits snowball [2]",
-            quality=quality,
-            n_particles=n_particles,
             E=1.4e5,  # Young's modulus (1.4e5)
             nu=0.2,  # Poisson's ratio (0.2)
             zeta=5,  # Hardening coefficient (10)
@@ -111,6 +103,7 @@ def main():
     print("-" * 150)
 
     mpm = MPM(
+        quality=quality,
         n_particles=n_particles,
         initial_gravity=[0, -9.8],
         should_write_to_disk=args.writeToDisk,

@@ -7,6 +7,7 @@ class MPM:
     def __init__(
         self,
         configurations: list[Configuration],
+        quality=1,
         n_particles=10_000,
         initial_gravity=[0, 0],  # Gravity of the simulation ([0, 0])
         is_paused=False,
@@ -15,6 +16,7 @@ class MPM:
         should_write_to_disk=False,
     ):
         configuration = configurations[configuration_id]
+
         # Parameters starting points for MPM
         self.E = configuration.E
         self.nu = configuration.nu
@@ -22,44 +24,40 @@ class MPM:
         self.theta_c = configuration.theta_c
         self.theta_s = configuration.theta_s
         self.rho_0 = configuration.rho_0
-        self.mu_0 = self.E / (2 * (1 + self.nu)) 
+        self.mu_0 = self.E / (2 * (1 + self.nu))
         self.lambda_0 = self.E * self.nu / ((1 + self.nu) * (1 - 2 * self.nu))
-
-
-        # Parameters to control the simulation
-        self.window = ti.ui.Window(name="MLS-MPM", res=(720, 720), fps_limit=60)
-        self.canvas = self.window.get_canvas()
-        self.gui = self.window.get_gui()
-        self.quality = configuration.quality
+        self.quality = quality
         self.n_particles = n_particles
-        self.n_grid = 128 * self.quality
+        self.n_grid = 128 * quality
         self.dx = 1 / self.n_grid
         self.inv_dx = float(self.n_grid)
         self.dt = 1e-4 / self.quality
         self.p_vol = (self.dx * 0.5) ** 2
         self.p_mass = self.p_vol * self.rho_0
-        self.sticky = configuration.sticky
+
+        # Parameters to control the simulation
+        self.window = ti.ui.Window(name="MLS-MPM", res=(720, 720), fps_limit=60)
+        self.canvas = self.window.get_canvas()
+        self.gui = self.window.get_gui()
+        self.frame = 0  # for writing this to disk
+        self.is_paused = is_paused
+        self.configurations = configurations
         self.initial_gravity = initial_gravity
+        self.configuration_id = configuration_id
         self.should_show_settings = should_show_settings
         self.should_write_to_disk = should_write_to_disk
-        self.is_paused = is_paused
-        self.frame = 0  # for writing this to disk
-        self.configurations = configurations
-        self.configuration_id = configuration_id
 
         # Fields
-        self.position = ti.Vector.field(2, dtype=float, shape=configuration.n_particles)  # position
-        self.velocity = ti.Vector.field(2, dtype=float, shape=configuration.n_particles)  # velocity
-        self.C = ti.Matrix.field(2, 2, dtype=float, shape=configuration.n_particles)  # affine velocity field
-        self.F = ti.Matrix.field(2, 2, dtype=float, shape=configuration.n_particles)  # deformation gradient
-        self.Jp = ti.field(dtype=float, shape=configuration.n_particles)  # plastic deformation
+        self.position = ti.Vector.field(2, dtype=float, shape=n_particles)  # position
+        self.velocity = ti.Vector.field(2, dtype=float, shape=n_particles)  # velocity
+        self.C = ti.Matrix.field(2, 2, dtype=float, shape=n_particles)  # affine velocity field
+        self.F = ti.Matrix.field(2, 2, dtype=float, shape=n_particles)  # deformation gradient
+        self.Jp = ti.field(dtype=float, shape=n_particles)  # plastic deformation
         self.grid_velo = ti.Vector.field(2, dtype=float, shape=(self.n_grid, self.n_grid))  # grid node momentum
         self.grid_mass = ti.field(dtype=float, shape=(self.n_grid, self.n_grid))  # grid node mass
         self.gravity = ti.Vector.field(2, dtype=float, shape=())
-        self.initial_position = ti.Vector.field(2, dtype=float, shape=configuration.n_particles)  # position
-        self.initial_velocity = ti.Vector.field(2, dtype=float, shape=configuration.n_particles)  # velocity
-        self.initial_position.from_numpy(configuration.position)
-        self.initial_velocity.from_numpy(configuration.velocity)
+        self.initial_position = ti.Vector.field(2, dtype=float, shape=n_particles)  # position
+        self.initial_velocity = ti.Vector.field(2, dtype=float, shape=n_particles)  # velocity
 
     @ti.kernel
     def reset_grids(self):
@@ -150,10 +148,17 @@ class MPM:
             self.C[i] = ti.Matrix.zero(float, 2, 2)
             self.Jp[i] = 1
 
-    def initialize_simulation(self):
+    def load_configuration(self):
         configuration = self.configurations[self.configuration_id]
         self.initial_position.from_numpy(configuration.position)
         self.initial_velocity.from_numpy(configuration.velocity)
+        self.E = configuration.E
+        self.nu = configuration.nu
+        self.zeta = configuration.zeta
+        self.theta_c = configuration.theta_c
+        self.theta_s = configuration.theta_s
+        self.rho_0 = configuration.rho_0
+        self.sticky = configuration.sticky
 
     def handle_events(self):
         if self.window.get_event(ti.ui.PRESS):
@@ -174,7 +179,7 @@ class MPM:
 
     def show_settings(self):
         if not self.should_show_settings:
-            return # don't bother
+            return  # don't bother
         with self.gui.sub_window("Settings", 0.01, 0.01, 0.98, 0.98) as w:
             # Parameters
             self.E = w.slider_float(text="E", old_value=self.E, minimum=4.8e4, maximum=4.8e5)
@@ -191,7 +196,7 @@ class MPM:
                 if w.checkbox(name, self.configuration_id == i):
                     self.configuration_id = i
             if self.configuration_id != prev_configuration_id:
-                self.initialize_simulation()
+                self.load_configuration()
                 self.reset_fields()
                 self.is_paused = True
             # Write to disk
@@ -222,7 +227,7 @@ class MPM:
         self.window.show()
 
     def run(self):
-        self.initialize_simulation()
+        self.load_configuration()
         self.reset_fields()
         while self.window.running:
             self.handle_events()
