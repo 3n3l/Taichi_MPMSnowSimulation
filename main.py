@@ -1,5 +1,5 @@
 from src.Configuration import Configuration
-from src.MLS_MPM import MPM
+from src.MLS_MPM import Simulation
 import taichi as ti
 import numpy as np
 from argparse import ArgumentParser, RawTextHelpFormatter
@@ -44,7 +44,6 @@ def main():
             zeta=8,  # Hardening coefficient (10)
             theta_c=2.5e-2,  # Critical compression (2.5e-2)
             theta_s=7.5e-3,  # Critical stretch (7.5e-3)
-            rho_0=4e2,  # Initial density (4e2)
             sticky=0.9,  # The lower, the stickier the border
             position=snowball_positions([[0.5, 0.5]], radius=radius, n_particles=n_particles),
             velocity=snowball_velocities([[5, 0]], n_particles=n_particles),
@@ -56,7 +55,6 @@ def main():
             zeta=10,  # Hardening coefficient (10)
             theta_c=2.5e-2,  # Critical compression (2.5e-2)
             theta_s=4.5e-3,  # Critical stretch (7.5e-3)
-            rho_0=4e2,  # Initial density (4e2)
             sticky=0.3,  # The lower, the stickier the border
             position=snowball_positions([[0.5, 0.5]], radius=radius, n_particles=n_particles),
             velocity=snowball_velocities([[0, 0]], n_particles=n_particles),
@@ -68,7 +66,6 @@ def main():
             zeta=8,  # Hardening coefficient (10)
             theta_c=1.5e-2,  # Critical compression (2.5e-2)
             theta_s=5.5e-3,  # Critical stretch (7.5e-3)
-            rho_0=4e2,  # Initial density (4e2)
             sticky=0.5,  # The lower, the stickier the border
             position=snowball_positions([[0.07, 0.595], [0.91, 0.615]], radius=radius, n_particles=n_particles),
             velocity=snowball_velocities([[6, 0], [-3, 0]], n_particles=n_particles),
@@ -80,7 +77,6 @@ def main():
             zeta=5,  # Hardening coefficient (10)
             theta_c=2.5e-2,  # Critical compression (2.5e-2)
             theta_s=4.0e-3,  # Critical stretch (7.5e-3)
-            rho_0=4e2,  # Initial density (4e2)
             sticky=0.5,  # The lower, the stickier the border
             position=snowball_positions([[0.06, 0.5], [0.94, 0.53]], radius=radius, n_particles=n_particles),
             velocity=snowball_velocities([[4, 0], [-4, 0]], n_particles=n_particles),
@@ -102,7 +98,7 @@ def main():
     parser.print_help()
     print("-" * 150)
 
-    mpm = MPM(
+    simulation = Simulation(
         quality=quality,
         n_particles=n_particles,
         initial_gravity=[0, -9.8],
@@ -112,7 +108,7 @@ def main():
         configurations=configurations,
         is_paused=args.paused,
     )
-    mpm.run()
+    simulation.run()
 
 
 if __name__ == "__main__":

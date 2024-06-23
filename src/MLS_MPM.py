@@ -3,35 +3,29 @@ import taichi as ti
 
 
 @ti.data_oriented
-class MPM:
+class Simulation:
     def __init__(
         self,
+        quality: int,
+        n_particles: int,
         configurations: list[Configuration],
-        quality=1,
-        n_particles=10_000,
-        initial_gravity=[0, 0],  # Gravity of the simulation ([0, 0])
-        is_paused=False,
-        configuration_id=0,
         should_show_settings=False,
         should_write_to_disk=False,
+        initial_gravity=[0, 0],  # Gravity of the simulation ([0, 0])
+        configuration_id=0,
+        is_paused=False,
     ):
-        configuration = configurations[configuration_id]
+        # Load the initial configuration
+        self.configuration = configurations[configuration_id]
 
-        # Parameters starting points for MPM
-        self.E = configuration.E
-        self.nu = configuration.nu
-        self.zeta = configuration.zeta
-        self.theta_c = configuration.theta_c
-        self.theta_s = configuration.theta_s
-        self.rho_0 = configuration.rho_0
-        self.mu_0 = self.E / (2 * (1 + self.nu))
-        self.lambda_0 = self.E * self.nu / ((1 + self.nu) * (1 - 2 * self.nu))
+        # MPM Parameters that are configuration independent
         self.quality = quality
         self.n_particles = n_particles
         self.n_grid = 128 * quality
         self.dx = 1 / self.n_grid
         self.inv_dx = float(self.n_grid)
         self.dt = 1e-4 / self.quality
+        self.rho_0 = 4e2
         self.p_vol = (self.dx * 0.5) ** 2
         self.p_mass = self.p_vol * self.rho_0
 
@@ -48,16 +42,16 @@ class MPM:
         self.should_write_to_disk = should_write_to_disk
 
         # Fields
-        self.position = ti.Vector.field(2, dtype=float, shape=n_particles)  # position
-        self.velocity = ti.Vector.field(2, dtype=float, shape=n_particles)  # velocity
-        self.C = ti.Matrix.field(2, 2, dtype=float, shape=n_particles)  # affine velocity field
-        self.F = ti.Matrix.field(2, 2, dtype=float, shape=n_particles)  # deformation gradient
-        self.Jp = ti.field(dtype=float, shape=n_particles)  # plastic deformation
-        self.grid_velo = ti.Vector.field(2, dtype=float, shape=(self.n_grid, self.n_grid))  # grid node momentum
-        self.grid_mass = ti.field(dtype=float, shape=(self.n_grid, self.n_grid))  # grid node mass
+        self.grid_velo = ti.Vector.field(2, dtype=float, shape=(self.n_grid, self.n_grid))
+        self.grid_mass = ti.field(dtype=float, shape=(self.n_grid, self.n_grid))
+        self.initial_position = ti.Vector.field(2, dtype=float, shape=self.n_particles)
+        self.initial_velocity = ti.Vector.field(2, dtype=float, shape=self.n_particles)
+        self.position = ti.Vector.field(2, dtype=float, shape=self.n_particles)
+        self.velocity = ti.Vector.field(2, dtype=float, shape=self.n_particles)
+        self.C = ti.Matrix.field(2, 2, dtype=float, shape=self.n_particles)  # affine velocity field
+        self.F = ti.Matrix.field(2, 2, dtype=float, shape=self.n_particles)  # deformation gradient
+        self.Jp = ti.field(dtype=float, shape=self.n_particles)  # plastic deformation
         self.gravity = ti.Vector.field(2, dtype=float, shape=())
-        self.initial_position = ti.Vector.field(2, dtype=float, shape=n_particles)  # position
-        self.initial_velocity = ti.Vector.field(2, dtype=float, shape=n_particles)  # velocity
 
     @ti.kernel
     def reset_grids(self):
@@ -66,7 +60,7 @@ class MPM:
             self.grid_mass[i, j] = 0
 
     @ti.kernel
-    def particle_to_grid(self):
+    def particle_to_grid(self, lambda_0: float, mu_0: float, zeta: float, theta_c: float, theta_s: float):
         for p in self.position:
             base = (self.position[p] * self.inv_dx - 0.5).cast(int)
             fx = self.position[p] * self.inv_dx - base.cast(float)
@@ -76,14 +70,14 @@ class MPM:
             self.F[p] = (ti.Matrix.identity(float, 2) + self.dt * self.C[p]) @ self.F[p]
             # Hardening coefficient: snow gets harder when compressed,
             # clamp this to stop the rebound from compressed snow
-            h = ti.max(0.1, ti.min(5, ti.exp(self.zeta * (1.0 - self.Jp[p]))))
-            mu, la = self.mu_0 * h, self.lambda_0 * h
+            h = ti.max(0.1, ti.min(5, ti.exp(zeta * (1.0 - self.Jp[p]))))
+            mu, la = mu_0 * h, lambda_0 * h
             U, sigma, V = ti.svd(self.F[p])
             J = 1.0
             for d in ti.static(range(2)):
                 singular_value = float(sigma[d, d])
-                singular_value = max(singular_value, 1 - self.theta_c)
-                singular_value = min(singular_value, 1 + self.theta_s)  # Plasticity
+                singular_value = max(singular_value, 1 - theta_c)
+                singular_value = min(singular_value, 1 + theta_s)  # Plasticity
                 self.Jp[p] *= sigma[d, d] / singular_value
                 sigma[d, d] = singular_value
                 J *= singular_value
@@ -103,7 +97,7 @@ class MPM:
                 self.grid_mass[base + offset] += weight * self.p_mass
 
     @ti.kernel
-    def momentum_to_velocity(self):
+    def momentum_to_velocity(self, sticky: float):
         for i, j in self.grid_mass:
             if self.grid_mass[i, j] > 0:  # No need for epsilon here
                 self.grid_velo[i, j] = (1 / self.grid_mass[i, j]) * self.grid_velo[i, j]
@@ -113,11 +107,11 @@ class MPM:
                 collision_right = i > (self.n_grid - 3) and self.grid_velo[i, j][0] > 0
                 if collision_left or collision_right:
                     self.grid_velo[i, j][0] = 0
-                    self.grid_velo[i, j][1] *= self.sticky
+                    self.grid_velo[i, j][1] *= sticky
                 collision_top = j < 3 and self.grid_velo[i, j][1] < 0
                 collision_bottom = j > (self.n_grid - 3) and self.grid_velo[i, j][1] > 0
                 if collision_top or collision_bottom:
-                    self.grid_velo[i, j][0] *= self.sticky
+                    self.grid_velo[i, j][0] *= sticky
                     self.grid_velo[i, j][1] = 0
 
     @ti.kernel
@@ -139,7 +133,7 @@ class MPM:
             self.position[p] += self.dt * new_v  # advection
 
     @ti.kernel
-    def reset_fields(self):
+    def reset_particles(self):
         self.gravity[None] = self.initial_gravity
         for i in range(self.n_particles):
             self.position[i] = self.initial_position[i]
@@ -152,18 +146,11 @@ class MPM:
         configuration = self.configurations[self.configuration_id]
         self.initial_position.from_numpy(configuration.position)
         self.initial_velocity.from_numpy(configuration.velocity)
-        self.E = configuration.E
-        self.nu = configuration.nu
-        self.zeta = configuration.zeta
-        self.theta_c = configuration.theta_c
-        self.theta_s = configuration.theta_s
-        self.rho_0 = configuration.rho_0
-        self.sticky = configuration.sticky
 
     def handle_events(self):
         if self.window.get_event(ti.ui.PRESS):
             if self.window.event.key == "r":
-                self.reset_fields()
+                self.reset_particles()
             elif self.window.event.key in [ti.GUI.SPACE, "p"]:
                 self.is_paused = not self.is_paused
             elif self.window.event.key in [ti.GUI.ESCAPE, ti.GUI.EXIT]:
@@ -172,23 +159,32 @@ class MPM:
     def substep(self):
         if not self.is_paused:
             for _ in range(int(2e-3 // self.dt)):
+                nu = self.configuration.nu
+                E = self.configuration.E
+                zeta = self.configuration.zeta
+                sticky = self.configuration.sticky
+                theta_c = self.configuration.theta_c
+                theta_s = self.configuration.theta_s
+                mu_0 = self.configuration.mu_0 = E / (2 * (1 + nu))
+                lambda_0 = self.configuration.lambda_0 = E * nu / ((1 + nu) * (1 - 2 * nu))
+
                 self.reset_grids()
-                self.particle_to_grid()
-                self.momentum_to_velocity()
+                self.particle_to_grid(lambda_0, mu_0, zeta, theta_c, theta_s)
+                self.momentum_to_velocity(sticky)
                 self.grid_to_particle()
 
     def show_settings(self):
         if not self.should_show_settings:
             return  # don't bother
-        with self.gui.sub_window("Settings", 0.01, 0.01, 0.98, 0.98) as w:
+        with self.gui.sub_window("Settings", 0.01, 0.01, 0.98, 0.5) as w:
             # Parameters
-            self.E = w.slider_float(text="E", old_value=self.E, minimum=4.8e4, maximum=4.8e5)
-            self.nu = w.slider_float(text="nu", old_value=self.nu, minimum=0, maximum=1)
-            self.zeta = w.slider_float(text="zeta", old_value=self.zeta, minimum=0, maximum=20)
-            self.theta_c = w.slider_float(text="theta_c", old_value=self.theta_c, minimum=0, maximum=5e-2)
-            self.theta_s = w.slider_float(text="theta_s", old_value=self.theta_s, minimum=0, maximum=15e-3)
-            self.rho_0 = w.slider_float(text="rho_0", old_value=self.rho_0, minimum=0, maximum=4e2)
-            self.sticky = w.slider_float(text="sticky", old_value=self.sticky, minimum=0, maximum=1)
+            config = self.configuration
+            config.E = w.slider_float(text="E", old_value=config.E, minimum=4.8e4, maximum=4.8e5)
+            config.nu = w.slider_float(text="nu", old_value=config.nu, minimum=0, maximum=1)
+            config.zeta = w.slider_float(text="zeta", old_value=config.zeta, minimum=0, maximum=20)
+            config.theta_c = w.slider_float(text="theta_c", old_value=config.theta_c, minimum=0, maximum=5e-2)
+            config.theta_s = w.slider_float(text="theta_s", old_value=config.theta_s, minimum=0, maximum=15e-3)
+            config.sticky = w.slider_float(text="sticky", old_value=config.sticky, minimum=0, maximum=1)
             # Presets
             prev_configuration_id = self.configuration_id
             for i in range(len(self.configurations)):
@@ -197,7 +193,7 @@ class MPM:
                     self.configuration_id = i
             if self.configuration_id != prev_configuration_id:
                 self.load_configuration()
-                self.reset_fields()
+                self.reset_particles()
                 self.is_paused = True
             # Write to disk
             if self.should_write_to_disk:
@@ -207,16 +203,16 @@ class MPM:
                 if w.button("Start recording"):
                     self.should_write_to_disk = True
             # Reset
-            if w.button("Reset"):
-                self.reset_fields()
-                self.is_paused = True
-            # Pause/Unpause
-            if self.is_paused:
-                if w.button("Play"):
-                    self.is_paused = False
-            else:
-                if w.button("Stop"):
-                    self.is_paused = True
+            # if w.button("Reset"):
+            #     self.reset_particles()
+            #     self.is_paused = True
+            # # Pause/Unpause
+            # if self.is_paused:
+            #     if w.button("Play"):
+            #         self.is_paused = False
+            # else:
+            #     if w.button("Stop"):
+            #         self.is_paused = True
 
     def render(self):
         self.canvas.set_background_color((0.054, 0.06, 0.09))
@@ -228,9 +224,9 @@ class MPM:
 
     def run(self):
         self.load_configuration()
-        self.reset_fields()
+        self.reset_particles()
         while self.window.running:
             self.handle_events()
-            self.substep()
             self.show_settings()
+            self.substep()
             self.render()
