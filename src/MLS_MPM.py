@@ -32,18 +32,6 @@ class MPM:
         self.mu_0 = E / (2 * (1 + nu))  # Lame parameters
         self.lambda_0 = E * nu / ((1 + nu) * (1 - 2 * nu))  # Lame parameters
 
-        self.should_show_settings = should_show_settings
-        self.should_write_to_disk = should_write_to_disk
-        self.is_paused = is_paused
-        self.frame = 0  # for writing this to disk
-
-        self.configuration_id = configuration_id
-        self.configurations = configurations
-        self.configuration = configurations[self.configuration_id]
-        self.initial_position = ti.Vector.field(2, dtype=float, shape=self.configuration.n_particles)  # position
-        self.initial_velocity = ti.Vector.field(2, dtype=float, shape=self.configuration.n_particles)  # velocity
-        self.initial_position.from_numpy(self.configuration.position)
-        self.initial_velocity.from_numpy(self.configuration.velocity)
 
         # Parameters to control the simulation
         self.window = ti.ui.Window(name="MLS-MPM", res=(720, 720), fps_limit=60)
@@ -54,21 +42,32 @@ class MPM:
         self.n_grid = 128 * self.quality
         self.dx = 1 / self.n_grid
         self.inv_dx = float(self.n_grid)
-        self.dt = 1e-4 / self.configuration.quality
+        self.dt = 1e-4 / self.quality
         self.p_vol = (self.dx * 0.5) ** 2
         self.p_mass = self.p_vol * rho_0
         self.sticky = sticky
         self.initial_gravity = initial_gravity
+        self.should_show_settings = should_show_settings
+        self.should_write_to_disk = should_write_to_disk
+        self.is_paused = is_paused
+        self.frame = 0  # for writing this to disk
+        self.configurations = configurations
+        self.configuration_id = configuration_id
 
         # Fields
-        self.position = ti.Vector.field(2, dtype=float, shape=self.configuration.n_particles)  # position
-        self.velocity = ti.Vector.field(2, dtype=float, shape=self.configuration.n_particles)  # velocity
-        self.C = ti.Matrix.field(2, 2, dtype=float, shape=self.configuration.n_particles)  # affine velocity field
-        self.F = ti.Matrix.field(2, 2, dtype=float, shape=self.configuration.n_particles)  # deformation gradient
-        self.Jp = ti.field(dtype=float, shape=self.configuration.n_particles)  # plastic deformation
+        configuration = configurations[configuration_id]
+        self.position = ti.Vector.field(2, dtype=float, shape=configuration.n_particles)  # position
+        self.velocity = ti.Vector.field(2, dtype=float, shape=configuration.n_particles)  # velocity
+        self.C = ti.Matrix.field(2, 2, dtype=float, shape=configuration.n_particles)  # affine velocity field
+        self.F = ti.Matrix.field(2, 2, dtype=float, shape=configuration.n_particles)  # deformation gradient
+        self.Jp = ti.field(dtype=float, shape=configuration.n_particles)  # plastic deformation
         self.grid_velo = ti.Vector.field(2, dtype=float, shape=(self.n_grid, self.n_grid))  # grid node momentum
         self.grid_mass = ti.field(dtype=float, shape=(self.n_grid, self.n_grid))  # grid node mass
         self.gravity = ti.Vector.field(2, dtype=float, shape=())
+        self.initial_position = ti.Vector.field(2, dtype=float, shape=configuration.n_particles)  # position
+        self.initial_velocity = ti.Vector.field(2, dtype=float, shape=configuration.n_particles)  # velocity
+        self.initial_position.from_numpy(configuration.position)
+        self.initial_velocity.from_numpy(configuration.velocity)
 
     @ti.kernel
     def reset_grids(self):
@@ -152,7 +151,7 @@ class MPM:
     @ti.kernel
     def reset_fields(self):
         self.gravity[None] = self.initial_gravity
-        for i in range(self.configuration.n_particles):
+        for i in range(self.n_particles):
             self.position[i] = self.initial_position[i]
             self.velocity[i] = self.initial_velocity[i]
             self.F[i] = ti.Matrix([[1, 0], [0, 1]])
