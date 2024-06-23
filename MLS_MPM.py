@@ -17,6 +17,7 @@ class MPM:
         quality=1,  # Use a larger value for higher-res simulations
         initial_gravity=[0, 0],  # Gravity of the simulation ([0, 0])
         attractor_active=False,  # Enables mouse controlled attractor (False)
+        save_to_disk=False,
         initial_velocities=np.array([[0, 0]], dtype=np.float32),
         initial_positions=np.array([[0, 0]], dtype=np.float32),
         initial_radii=np.array([0.5], dtype=np.float32),
@@ -43,6 +44,7 @@ class MPM:
         self.p_mass = self.p_vol * rho_0
         self.sticky = sticky
         self.initial_gravity = initial_gravity
+        self.save_to_disk = save_to_disk
         self.attractor_is_active = attractor_active
         self.group_size = self.n_particles // initial_radii.shape[0]
         self.thetas = ti.field(dtype=float, shape=self.group_size)  # used to parametrize the snowball
@@ -96,9 +98,7 @@ class MPM:
                 J *= singular_value
             # Reconstruct elastic deformation gradient after plasticity
             self.F[p] = U @ sigma @ V.transpose()
-            stress = 2 * mu * (self.F[p] - U @ V.transpose()) @ self.F[
-                p
-            ].transpose() + ti.Matrix.identity(float, 2) * la * J * (J - 1)
+            stress = 2 * mu * (self.F[p] - U @ V.transpose()) @ self.F[p].transpose() + ti.Matrix.identity(float, 2) * la * J * (J - 1)
             stress = (-self.dt * self.p_vol * 4 * self.inv_dx * self.inv_dx) * stress
             affine = stress + self.p_mass * self.C[p]
             for i, j in ti.static(ti.ndrange(3, 3)):
@@ -194,5 +194,6 @@ class MPM:
                 self.momentum_to_velocity()
                 self.grid_to_particle()
 
-            self.gui.circles(self.position.to_numpy(), radius=1.25)
-            self.gui.show(f'{frame:06d}.png')  # change to gui.show(f'{frame:06d}.png') to write images to disk
+            # self.gui.circles(self.position.to_numpy(), radius=1.25)
+            self.gui.circles(self.position.to_numpy(), radius=1.5, color=0xd4d4d4)
+            self.gui.show(f'{frame:06d}.png' if self.save_to_disk else None)
