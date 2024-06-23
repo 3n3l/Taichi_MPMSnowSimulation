@@ -7,16 +7,20 @@ class MPM:
     def __init__(
         self,
         configurations: list[Configuration],
-        E=1.4e5,  # Young's modulus (1.4e5)
         nu=0.2,  # Poisson's ratio (0.2)
+        E=1.4e5,  # Young's modulus (1.4e5)
         zeta=10,  # Hardening coefficient (10)
+        rho_0=4e2,  # Initial density (4e2)
+        quality=1,  # Use a larger value for higher-res simulations
+        sticky=0.5,  # The lower, the stickier the border
         theta_c=2.5e-2,  # Critical compression (2.5e-2)
         theta_s=7.5e-3,  # Critical stretch (7.5e-3)
-        rho_0=4e2,  # Initial density (4e2)
-        sticky=0.5,  # The lower, the stickier the border
-        quality=1,  # Use a larger value for higher-res simulations
         n_particles=10_000,
         initial_gravity=[0, 0],  # Gravity of the simulation ([0, 0])
+        is_paused=False,
+        configuration_id=0,
+        should_show_settings=False,
+        should_write_to_disk=False,
     ):
         # Parameters starting points for MPM
         self.E = E
@@ -28,11 +32,12 @@ class MPM:
         self.mu_0 = E / (2 * (1 + nu))  # Lame parameters
         self.lambda_0 = E * nu / ((1 + nu) * (1 - 2 * nu))  # Lame parameters
 
-        self.write_to_disk = False
-        self.is_paused = True
+        self.should_show_settings = should_show_settings
+        self.should_write_to_disk = should_write_to_disk
+        self.is_paused = is_paused
         self.frame = 0  # for writing this to disk
 
-        self.configuration_id = 0
+        self.configuration_id = configuration_id
         self.configurations = configurations
         self.configuration = configurations[self.configuration_id]
         self.initial_position = ti.Vector.field(2, dtype=float, shape=self.configuration.n_particles)  # position
@@ -176,7 +181,9 @@ class MPM:
                 self.momentum_to_velocity()
                 self.grid_to_particle()
 
-    def show_options(self):
+    def show_settings(self):
+        if not self.should_show_settings:
+            return # don't bother
         with self.gui.sub_window("Settings", 0.01, 0.01, 0.98, 0.98) as w:
             # Parameters
             self.E = w.slider_float(text="E", old_value=self.E, minimum=4.8e4, maximum=4.8e5)
@@ -197,12 +204,12 @@ class MPM:
                 self.reset_fields()
                 self.is_paused = True
             # Write to disk
-            if self.write_to_disk:
+            if self.should_write_to_disk:
                 if w.button("Stop recording"):
-                    self.write_to_disk = False
+                    self.should_write_to_disk = False
             else:
                 if w.button("Start recording"):
-                    self.write_to_disk = True
+                    self.should_write_to_disk = True
             # Reset
             if w.button("Reset"):
                 self.reset_fields()
@@ -218,7 +225,7 @@ class MPM:
     def render(self):
         self.canvas.set_background_color((0.054, 0.06, 0.09))
         self.canvas.circles(centers=self.position, radius=0.0016, color=(0.8, 0.8, 0.8))
-        if self.write_to_disk:
+        if self.should_write_to_disk:
             self.window.save_image(f"{self.frame:06d}.png")
             self.frame += 1
         self.window.show()
@@ -229,5 +236,5 @@ class MPM:
         while self.window.running:
             self.handle_events()
             self.substep()
-            self.show_options()
+            self.show_settings()
             self.render()
