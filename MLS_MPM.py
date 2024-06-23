@@ -13,7 +13,7 @@ class Configuration:
         n_particles: int,
         quality: int,
         name: str,
-     ):
+    ):
         n = position.shape[0]
         m = velocity.shape[0]
         assert n == m, "Positions and velocities shape not matching!"
@@ -24,6 +24,7 @@ class Configuration:
         self.group_size = position.shape[0]
         self.velocity = velocity
         self.position = position
+
 
 @ti.data_oriented
 class MPM:
@@ -84,7 +85,7 @@ class MPM:
         self.C = ti.Matrix.field(2, 2, dtype=float, shape=self.configuration.n_particles)  # affine velocity field
         self.F = ti.Matrix.field(2, 2, dtype=float, shape=self.configuration.n_particles)  # deformation gradient
         self.Jp = ti.field(dtype=float, shape=self.configuration.n_particles)  # plastic deformation
-        self.grid_velo = ti.Vector.field(2, dtype=float, shape=(self.n_grid, self.n_grid))  # grid node momentum/velocity
+        self.grid_velo = ti.Vector.field(2, dtype=float, shape=(self.n_grid, self.n_grid))  # grid node momentum
         self.grid_mass = ti.field(dtype=float, shape=(self.n_grid, self.n_grid))  # grid node mass
         self.gravity = ti.Vector.field(2, dtype=float, shape=())
 
@@ -118,8 +119,9 @@ class MPM:
                 J *= singular_value
             # Reconstruct elastic deformation gradient after plasticity
             self.F[p] = U @ sigma @ V.transpose()
-            stress = 2 * mu * (self.F[p] - U @ V.transpose()) @ self.F[p].transpose() + ti.Matrix.identity(float, 2) * la * J * (J - 1)
-            stress = (-self.dt * self.p_vol * 4 * self.inv_dx * self.inv_dx) * stress
+            stress = 2 * mu * (self.F[p] - U @ V.transpose()) @ self.F[p].transpose()
+            stress = stress + ti.Matrix.identity(float, 2) * la * J * (J - 1)
+            stress = stress * (-self.dt * self.p_vol * 4 * self.inv_dx * self.inv_dx)
             affine = stress + self.p_mass * self.C[p]
             for i, j in ti.static(ti.ndrange(3, 3)):
                 # Loop over 3x3 grid node neighborhood
@@ -181,7 +183,6 @@ class MPM:
         self.initial_position.from_numpy(configuration.position)
         self.initial_velocity.from_numpy(configuration.velocity)
 
-
     def handle_events(self):
         if self.window.get_event(ti.ui.PRESS):
             if self.window.event.key == "r":
@@ -189,7 +190,7 @@ class MPM:
             elif self.window.event.key in [ti.GUI.SPACE, "p"]:
                 self.is_paused = not self.is_paused
             elif self.window.event.key in [ti.GUI.ESCAPE, ti.GUI.EXIT]:
-                self.window.running = False # Stop the simulation
+                self.window.running = False  # Stop the simulation
 
     def substep(self):
         if not self.is_paused:
@@ -198,6 +199,7 @@ class MPM:
                 self.particle_to_grid()
                 self.momentum_to_velocity()
                 self.grid_to_particle()
+
     def show_options(self):
         with self.gui.sub_window("Settings", 0.01, 0.01, 0.98, 0.98) as w:
             # Parameters
@@ -241,8 +243,9 @@ class MPM:
         self.canvas.set_background_color((0.054, 0.06, 0.09))
         self.canvas.circles(centers=self.position, radius=0.0016, color=(0.8, 0.8, 0.8))
         if self.write_to_disk:
-            self.window.save_image(f'{self.frame:06d}.png')
+            self.window.save_image(f"{self.frame:06d}.png")
             self.frame += 1
+        self.window.show()
 
     def run(self):
         self.initialize_simulation()
@@ -252,9 +255,9 @@ class MPM:
             self.substep()
             self.show_options()
             self.render()
-            self.window.show()
 
-def snowball_positions(position=[[0,0]], n_particles=1000, radius=1.0):
+
+def snowball_positions(position=[[0, 0]], n_particles=1000, radius=1.0):
     n_snowballs = len(position)
     group_size = n_particles // n_snowballs
     p = np.zeros(shape=(n_particles, 2), dtype=np.float32)
@@ -266,7 +269,8 @@ def snowball_positions(position=[[0,0]], n_particles=1000, radius=1.0):
         p[i, 1] = (r[i] * np.cos(thetas[i % group_size])) + position[j][1]
     return p
 
-def snowball_velocities(velocity=[[0,0]], n_particles=1000):
+
+def snowball_velocities(velocity=[[0, 0]], n_particles=1000):
     n_snowballs = len(velocity)
     group_size = n_particles // n_snowballs
     v = np.zeros(shape=(n_particles, 2), dtype=np.float32)
@@ -275,6 +279,7 @@ def snowball_velocities(velocity=[[0,0]], n_particles=1000):
         v[i, 0] = velocity[j][0]
         v[i, 1] = velocity[j][1]
     return v
+
 
 def main():
     print("[Hint] Press R to reset, SPACE to pause/unpause the simulation!")
@@ -287,29 +292,29 @@ def main():
         quality=quality,
         n_particles=n_particles,
         initial_gravity=[0, -9.8],
-        configurations = [
+        configurations=[
             Configuration(
                 name="Snowball hits wall",
                 quality=quality,
-                n_particles=n_particles, 
+                n_particles=n_particles,
                 position=snowball_positions([[0.5, 0.5]], radius=radius, n_particles=n_particles),
                 velocity=snowball_velocities([[5, 0]], n_particles=n_particles),
             ),
             Configuration(
                 name="Snowball hits ground",
                 quality=quality,
-                n_particles=n_particles, 
+                n_particles=n_particles,
                 position=snowball_positions([[0.5, 0.5]], radius=radius, n_particles=n_particles),
                 velocity=snowball_velocities([[0, 0]], n_particles=n_particles),
             ),
             Configuration(
                 name="Snowball hits snowball",
                 quality=quality,
-                n_particles=n_particles, 
+                n_particles=n_particles,
                 position=snowball_positions([[0.06, 0.595], [0.94, 0.615]], radius=radius, n_particles=n_particles),
                 velocity=snowball_velocities([[3, 0], [-3, 0]], n_particles=n_particles),
             ),
-        ]
+        ],
     )
     print("[Hint] Starting the simulation!")
     mpm.run()
