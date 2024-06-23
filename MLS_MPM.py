@@ -6,7 +6,6 @@ import numpy as np
 ti.init(arch=ti.vulkan)
 
 
-@ti.data_oriented
 class Configuration:
     def __init__(
         self,
@@ -24,10 +23,8 @@ class Configuration:
         self.quality = quality
         self.n_particles = n_particles
         self.group_size = position.shape[0]
-        self.velocity = ti.Vector.field(n=2, dtype=float, shape=velocity.shape[0])
-        self.position = ti.Vector.field(n=2, dtype=float, shape=position.shape[0])
-        self.velocity.from_numpy(velocity)
-        self.position.from_numpy(position)
+        self.velocity = velocity
+        self.position = position
 
 @ti.data_oriented
 class MPM:
@@ -61,6 +58,10 @@ class MPM:
         self.configuration_id = 0
         self.configurations = configurations
         self.configuration = configurations[self.configuration_id]
+        self.initial_position = ti.Vector.field(2, dtype=float, shape=self.configuration.n_particles)  # position
+        self.initial_velocity = ti.Vector.field(2, dtype=float, shape=self.configuration.n_particles)  # velocity
+        self.initial_position.from_numpy(self.configuration.position)
+        self.initial_velocity.from_numpy(self.configuration.velocity)
 
         # Parameters to control the simulation
         self.window = window
@@ -172,23 +173,29 @@ class MPM:
             self.position[p] += self.dt * new_v  # advection
 
     @ti.kernel
-    def reset(self, configuration_id: int):
+    def reset(self):
         self.gravity[None] = self.initial_gravity
-        configuration = self.configurations[int(configuration_id)]
         for i in range(self.configuration.n_particles):
-            self.position[i] = configuration.position[i]
-            self.velocity[i] = configuration.velocity[i]
+            self.position[i] = self.initial_position[i]
+            self.velocity[i] = self.initial_velocity[i]
             self.F[i] = ti.Matrix([[1, 0], [0, 1]])
             self.C[i] = ti.Matrix.zero(float, 2, 2)
             self.Jp[i] = 1
 
+    def initialize(self):
+        configuration = self.configurations[self.configuration_id]
+        self.initial_position.from_numpy(configuration.position)
+        self.initial_velocity.from_numpy(configuration.velocity)
+
+
     def run(self):
-        self.reset(self.configuration_id)
+        self.initialize()
+        self.reset()
 
         while self.window.running:
             if self.window.get_event(ti.ui.PRESS):
                 if self.window.event.key == "r":
-                    self.reset(self.configuration_id)
+                    self.reset()
                 elif self.window.event.key in [ti.GUI.ESCAPE, ti.GUI.EXIT]:
                     break
 
@@ -204,14 +211,6 @@ class MPM:
                     self.gravity[None] = self.initial_gravity
                     self.attractor_strength[None] = -1
 
-            # print(self.position)
-            print(self.velocity)
-            conf = self.configurations[self.configuration_id]
-            print("=" * 111)
-            print(conf.name)
-            print(self.velocity)
-            print(conf.velocity)
-            print("=" * 111)
             if not self.paused:
                 for _ in range(int(2e-3 // self.dt)):
                     self.reset_grids()
@@ -238,7 +237,8 @@ class MPM:
                 if self.configuration_id != prev_configuration_id:
                     # print(self.configurations[self.configuration_id].position)
                     # print(self.configurations[self.configuration_id].velocity)
-                    self.reset(self.configuration_id)
+                    self.initialize()
+                    self.reset()
                 #     self.paused = True
                 # if self.paused:
                 #     if w.button("Continue"):
