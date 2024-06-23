@@ -52,7 +52,7 @@ class MPM:
         self.lambda_0 = E * nu / ((1 + nu) * (1 - 2 * nu))  # Lame parameters
 
         self.write_to_disk = False
-        self.is_paused = False
+        self.is_paused = True
         self.frame = 0  # for writing this to disk
 
         self.configuration_id = 0
@@ -182,65 +182,76 @@ class MPM:
         self.initial_velocity.from_numpy(configuration.velocity)
 
 
+    def handle_events(self):
+        if self.window.get_event(ti.ui.PRESS):
+            if self.window.event.key == "r":
+                self.reset_fields()
+            elif self.window.event.key in [ti.GUI.SPACE, "p"]:
+                self.is_paused = not self.is_paused
+            elif self.window.event.key in [ti.GUI.ESCAPE, ti.GUI.EXIT]:
+                self.window.running = False # Stop the simulation
+
+    def substep(self):
+        if not self.is_paused:
+            for _ in range(int(2e-3 // self.dt)):
+                self.reset_grids()
+                self.particle_to_grid()
+                self.momentum_to_velocity()
+                self.grid_to_particle()
+    def show_options(self):
+        with self.gui.sub_window("Settings", 0.01, 0.01, 0.98, 0.98) as w:
+            # Parameters
+            self.E = w.slider_float(text="E", old_value=self.E, minimum=4.8e4, maximum=4.8e5)
+            self.nu = w.slider_float(text="nu", old_value=self.nu, minimum=0, maximum=1)
+            self.zeta = w.slider_float(text="zeta", old_value=self.zeta, minimum=0, maximum=20)
+            self.theta_c = w.slider_float(text="theta_c", old_value=self.theta_c, minimum=0, maximum=5e-2)
+            self.theta_s = w.slider_float(text="theta_s", old_value=self.theta_s, minimum=0, maximum=15e-3)
+            self.rho_0 = w.slider_float(text="rho_0", old_value=self.rho_0, minimum=0, maximum=4e2)
+            self.sticky = w.slider_float(text="sticky", old_value=self.sticky, minimum=0, maximum=1)
+            # Presets
+            prev_configuration_id = self.configuration_id
+            for i in range(len(self.configurations)):
+                name = self.configurations[i].name
+                if w.checkbox(name, self.configuration_id == i):
+                    self.configuration_id = i
+            if self.configuration_id != prev_configuration_id:
+                self.initialize_simulation()
+                self.reset_fields()
+                self.is_paused = True
+            # Write to disk
+            if self.write_to_disk:
+                if w.button("Stop recording"):
+                    self.write_to_disk = False
+            else:
+                if w.button("Start recording"):
+                    self.write_to_disk = True
+            # Reset
+            if w.button("Reset"):
+                self.reset_fields()
+                self.is_paused = True
+            # Pause/Unpause
+            if self.is_paused:
+                if w.button("Play"):
+                    self.is_paused = False
+            else:
+                if w.button("Stop"):
+                    self.is_paused = True
+
+    def render(self):
+        self.canvas.set_background_color((0.054, 0.06, 0.09))
+        self.canvas.circles(centers=self.position, radius=0.0016, color=(0.8, 0.8, 0.8))
+        if self.write_to_disk:
+            self.window.save_image(f'{self.frame:06d}.png')
+            self.frame += 1
+
     def run(self):
         self.initialize_simulation()
         self.reset_fields()
-
         while self.window.running:
-            if self.window.get_event(ti.ui.PRESS):
-                if self.window.event.key == "r":
-                    self.reset_fields()
-                elif self.window.event.key in [ti.GUI.SPACE, "p"]:
-                    self.is_paused = not self.is_paused
-                elif self.window.event.key in [ti.GUI.ESCAPE, ti.GUI.EXIT]:
-                    break
-
-            if not self.is_paused:
-                for _ in range(int(2e-3 // self.dt)):
-                    self.reset_grids()
-                    self.particle_to_grid()
-                    self.momentum_to_velocity()
-                    self.grid_to_particle()
-
-            with self.gui.sub_window("Settings", 0.01, 0.01, 0.98, 0.5) as w:
-                # MPM parameters
-                self.E = w.slider_float(text="E", old_value=self.E, minimum=4.8e4, maximum=4.8e5)
-                self.nu = w.slider_float(text="nu", old_value=self.nu, minimum=0, maximum=1)
-                self.zeta = w.slider_float(text="zeta", old_value=self.zeta, minimum=0, maximum=20)
-                self.theta_c = w.slider_float(text="theta_c", old_value=self.theta_c, minimum=0, maximum=5e-2)
-                self.theta_s = w.slider_float(text="theta_s", old_value=self.theta_s, minimum=0, maximum=15e-3)
-                self.rho_0 = w.slider_float(text="rho_0", old_value=self.rho_0, minimum=0, maximum=4e2)
-                self.sticky = w.slider_float(text="sticky", old_value=self.sticky, minimum=0, maximum=1)
-                # Presets
-                prev_configuration_id = self.configuration_id
-                for i in range(len(self.configurations)):
-                    name = self.configurations[i].name
-                    if w.checkbox(name, self.configuration_id == i):
-                        self.configuration_id = i
-                if self.configuration_id != prev_configuration_id:
-                    self.initialize_simulation()
-                    self.reset_fields()
-                    self.is_paused = True
-                # Pause/Unpause
-                if self.is_paused:
-                    if w.button("Continue"):
-                        self.is_paused = False
-                else:
-                    if w.button("Pause"):
-                        self.is_paused = True
-                # Write to disk
-                if self.write_to_disk:
-                    if w.button("Stop recording"):
-                        self.write_to_disk = False
-                else:
-                    if w.button("Start recording"):
-                        self.write_to_disk = True
-
-            self.canvas.set_background_color((0.054, 0.06, 0.09))
-            self.canvas.circles(centers=self.position, radius=0.0016, color=(0.8, 0.8, 0.8))
-            if self.write_to_disk:
-                self.window.save_image(f'{self.frame:06d}.png')
-                self.frame += 1
+            self.handle_events()
+            self.substep()
+            self.show_options()
+            self.render()
             self.window.show()
 
 def snowball_positions(position=[[0,0]], n_particles=1000, radius=1.0):
@@ -266,7 +277,7 @@ def snowball_velocities(velocity=[[0,0]], n_particles=1000):
     return v
 
 def main():
-    print("[Hint] Press R to reset.")
+    print("[Hint] Press R to reset, SPACE to pause/unpause the simulation!")
 
     quality = 3
     radius = 0.05
