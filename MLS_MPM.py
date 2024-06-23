@@ -42,7 +42,6 @@ class MPM:
         quality=1,  # Use a larger value for higher-res simulations
         n_particles=10_000,
         initial_gravity=[0, 0],  # Gravity of the simulation ([0, 0])
-        attractor_active=False,  # Enables mouse controlled attractor (False)
     ):
         # Parameters starting points for MPM
         self.E = E
@@ -80,7 +79,6 @@ class MPM:
         self.p_mass = self.p_vol * rho_0
         self.sticky = sticky
         self.initial_gravity = initial_gravity
-        self.attractor_is_active = attractor_active
 
         # Fields
         self.position = ti.Vector.field(2, dtype=float, shape=self.configuration.n_particles)  # position
@@ -91,8 +89,6 @@ class MPM:
         self.grid_velo = ti.Vector.field(2, dtype=float, shape=(self.n_grid, self.n_grid))  # grid node momentum/velocity
         self.grid_mass = ti.field(dtype=float, shape=(self.n_grid, self.n_grid))  # grid node mass
         self.gravity = ti.Vector.field(2, dtype=float, shape=())
-        self.attractor_strength = ti.field(dtype=float, shape=())
-        self.attractor_pos = ti.Vector.field(2, dtype=float, shape=())
 
     @ti.kernel
     def reset_grids(self):
@@ -142,9 +138,6 @@ class MPM:
             if self.grid_mass[i, j] > 0:  # No need for epsilon here
                 self.grid_velo[i, j] = (1 / self.grid_mass[i, j]) * self.grid_velo[i, j]
                 self.grid_velo[i, j] += self.dt * self.gravity[None]  # gravity
-                dist = self.attractor_pos[None] - self.dx * ti.Vector([i, j])
-                attr = self.attractor_strength[None]
-                self.grid_velo[i, j] += (dist / (0.01 + dist.norm()) * attr * self.dt * 100)
                 # Boundary conditions for the grid velocities
                 collision_left = i < 3 and self.grid_velo[i, j][0] < 0
                 collision_right = i > (self.n_grid - 3) and self.grid_velo[i, j][0] > 0
@@ -203,18 +196,6 @@ class MPM:
                     self.is_paused = not self.is_paused
                 elif self.window.event.key in [ti.GUI.ESCAPE, ti.GUI.EXIT]:
                     break
-
-            if self.attractor_is_active:
-                mouse = self.window.get_cursor_pos()
-                self.attractor_strength[None] = 0
-                if self.window.is_pressed(ti.GUI.LMB):
-                    self.attractor_pos[None] = [mouse[0], mouse[1]]
-                    self.gravity[None] = self.initial_gravity
-                    self.attractor_strength[None] = 1
-                if self.window.is_pressed(ti.GUI.RMB):
-                    self.attractor_pos[None] = [mouse[0], mouse[1]]
-                    self.gravity[None] = self.initial_gravity
-                    self.attractor_strength[None] = -1
 
             if not self.is_paused:
                 for _ in range(int(2e-3 // self.dt)):
