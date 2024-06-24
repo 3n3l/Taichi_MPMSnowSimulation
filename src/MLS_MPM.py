@@ -17,9 +17,6 @@ class Simulation:
         configuration_id=0,
         is_paused=False,
     ):
-        # Load the initial configuration
-        self.configuration = configurations[configuration_id]
-
         # MPM Parameters that are configuration independent
         self.quality = quality
         self.n_particles = n_particles
@@ -62,6 +59,10 @@ class Simulation:
         self.Jp = ti.field(dtype=float, shape=self.n_particles)  # plastic deformation
         self.gravity = ti.Vector.field(2, dtype=float, shape=())
 
+        # Load the initial configuration
+        self.configuration = configurations[configuration_id]
+        self.load_configuration()
+
     @ti.kernel
     def reset_grids(self):
         for i, j in self.grid_mass:
@@ -79,7 +80,7 @@ class Simulation:
             self.F[p] = (ti.Matrix.identity(float, 2) + self.dt * self.C[p]) @ self.F[p]
             # Hardening coefficient: snow gets harder when compressed,
             # clamp this to stop the rebound from compressed snow
-            h = ti.max(0.1, ti.min(5, ti.exp(zeta * (1.0 - self.Jp[p]))))
+            h = ti.max(0.1, ti.min(zeta, ti.exp(zeta * (1.0 - self.Jp[p]))))
             mu, la = mu_0 * h, lambda_0 * h
             U, sigma, V = ti.svd(self.F[p])
             J = 1.0
@@ -106,7 +107,7 @@ class Simulation:
                 self.grid_mass[base + offset] += weight * self.p_mass
 
     @ti.kernel
-    def momentum_to_velocity(self, sticky: float):
+    def momentum_to_velocity(self, stickiness: float):
         for i, j in self.grid_mass:
             if self.grid_mass[i, j] > 0:  # No need for epsilon here
                 self.grid_velo[i, j] = (1 / self.grid_mass[i, j]) * self.grid_velo[i, j]
@@ -116,15 +117,15 @@ class Simulation:
                 collision_right = i > (self.n_grid - 3) and self.grid_velo[i, j][0] > 0
                 if collision_left or collision_right:
                     self.grid_velo[i, j][0] = 0
-                    self.grid_velo[i, j][1] *= sticky
+                    self.grid_velo[i, j][1] *= 1 / stickiness
                 collision_top = j < 3 and self.grid_velo[i, j][1] < 0
                 collision_bottom = j > (self.n_grid - 3) and self.grid_velo[i, j][1] > 0
                 if collision_top or collision_bottom:
-                    self.grid_velo[i, j][0] *= sticky
+                    self.grid_velo[i, j][0] *= 1 / stickiness
                     self.grid_velo[i, j][1] = 0
 
     @ti.kernel
-    def grid_to_particle(self):
+    def grid_to_particle(self, stickiness: float):
         for p in self.position:
             base = (self.position[p] * self.inv_dx - 0.5).cast(int)
             fx = self.position[p] * self.inv_dx - base.cast(float)
@@ -138,6 +139,13 @@ class Simulation:
                 weight = w[i][0] * w[j][1]
                 new_v += weight * g_v
                 new_C += 4 * self.inv_dx * weight * g_v.outer_product(dpos)
+            # Dampen velocity if the particle is close to a boundary
+            position = self.position[p]
+            particle_close_to_boundary = position[0] < 0.01 or position[0] > 0.99
+            particle_close_to_boundary |= position[1] < 0.01 or position[1] > 0.99
+            if particle_close_to_boundary:
+                new_v[0] *= 1 / stickiness
+                new_v[1] *= 1 / stickiness
             self.velocity[p], self.C[p] = new_v, new_C
             self.position[p] += self.dt * new_v  # advection
 
@@ -152,9 +160,15 @@ class Simulation:
             self.Jp[i] = 1
 
     def load_configuration(self):
-        configuration = self.configurations[self.configuration_id]
-        self.initial_position.from_numpy(configuration.position)
-        self.initial_velocity.from_numpy(configuration.velocity)
+        self.initial_position.from_numpy(self.configuration.position)
+        self.initial_velocity.from_numpy(self.configuration.velocity)
+        # Save configuration variables, so these won't be overriden
+        self.stickiness = self.configuration.stickiness
+        self.theta_c = self.configuration.theta_c
+        self.theta_s = self.configuration.theta_s
+        self.zeta = self.configuration.zeta
+        self.nu = self.configuration.nu
+        self.E = self.configuration.E
 
     def handle_events(self):
         if self.window.get_event(ti.ui.PRESS):
@@ -171,16 +185,15 @@ class Simulation:
                 nu = self.configuration.nu
                 E = self.configuration.E
                 zeta = self.configuration.zeta
-                sticky = self.configuration.sticky
+                stickiness = self.configuration.stickiness
                 theta_c = self.configuration.theta_c
                 theta_s = self.configuration.theta_s
-                mu_0 = self.configuration.mu_0 = E / (2 * (1 + nu))
-                lambda_0 = self.configuration.lambda_0 = E * nu / ((1 + nu) * (1 - 2 * nu))
-
+                mu_0 = E / (2 * (1 + nu))
+                lambda_0 = E * nu / ((1 + nu) * (1 - 2 * nu))
                 self.reset_grids()
                 self.particle_to_grid(lambda_0, mu_0, zeta, theta_c, theta_s)
-                self.momentum_to_velocity(sticky)
-                self.grid_to_particle()
+                self.momentum_to_velocity(stickiness)
+                self.grid_to_particle(stickiness)
 
     def show_settings(self):
         if not self.should_show_settings:
@@ -188,13 +201,13 @@ class Simulation:
         with self.gui.sub_window("Settings", 0.01, 0.01, 0.98, 0.5) as w:
             # Parameters
             config = self.configuration
-            config.E = w.slider_float(text="E", old_value=config.E, minimum=4.8e4, maximum=4.8e5)
-            config.nu = w.slider_float(text="nu", old_value=config.nu, minimum=0, maximum=1)
-            config.zeta = w.slider_float(text="zeta", old_value=config.zeta, minimum=0, maximum=20)
-            config.theta_c = w.slider_float(text="theta_c", old_value=config.theta_c, minimum=0, maximum=5e-2)
-            config.theta_s = w.slider_float(text="theta_s", old_value=config.theta_s, minimum=0, maximum=15e-3)
-            config.sticky = w.slider_float(text="sticky", old_value=config.sticky, minimum=0, maximum=1)
-            # Presets
+            self.stickiness = w.slider_int(text="stickiness", old_value=self.stickiness, minimum=1, maximum=10)
+            self.theta_c = w.slider_float(text="theta_c", old_value=self.theta_c, minimum=0, maximum=5e-2)
+            self.theta_s = w.slider_float(text="theta_s", old_value=self.theta_s, minimum=0, maximum=15e-3)
+            self.zeta = w.slider_int(text="zeta", old_value=self.zeta, minimum=1, maximum=20)
+            self.nu = w.slider_float(text="nu", old_value=self.nu, minimum=0, maximum=1)
+            self.E = w.slider_float(text="E", old_value=self.E, minimum=4.8e4, maximum=4.8e5)
+            # Configurations
             prev_configuration_id = self.configuration_id
             for i in range(len(self.configurations)):
                 name = self.configurations[i].name
