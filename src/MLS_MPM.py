@@ -1,5 +1,7 @@
 from src.Configuration import Configuration
+from datetime import datetime
 import taichi as ti
+import os
 
 
 @ti.data_oriented
@@ -33,13 +35,20 @@ class Simulation:
         self.window = ti.ui.Window(name="MLS-MPM", res=(720, 720), fps_limit=60)
         self.canvas = self.window.get_canvas()
         self.gui = self.window.get_gui()
-        self.frame = 0  # for writing this to disk
         self.is_paused = is_paused
         self.configurations = configurations
         self.initial_gravity = initial_gravity
         self.configuration_id = configuration_id
         self.should_show_settings = should_show_settings
         self.should_write_to_disk = should_write_to_disk
+        self.frame = 0  # for writing this to disk
+        # Create folders to dump the frames
+        if should_write_to_disk:
+            self.directory = datetime.now().strftime("%d%m%Y_%H%M")
+            if not os.path.exists(".output"):
+                os.makedirs(".output")
+            if not os.path.exists(f".output/{self.directory}"):
+                os.makedirs(f".output/{self.directory}")
 
         # Fields
         self.grid_velo = ti.Vector.field(2, dtype=float, shape=(self.n_grid, self.n_grid))
@@ -203,22 +212,22 @@ class Simulation:
                 if w.button("Start recording"):
                     self.should_write_to_disk = True
             # Reset
-            # if w.button("Reset"):
-            #     self.reset_particles()
-            #     self.is_paused = True
-            # # Pause/Unpause
-            # if self.is_paused:
-            #     if w.button("Play"):
-            #         self.is_paused = False
-            # else:
-            #     if w.button("Stop"):
-            #         self.is_paused = True
+            if w.button("Reset"):
+                self.reset_particles()
+                self.is_paused = True
+            # Pause/Unpause
+            if self.is_paused:
+                if w.button("Play"):
+                    self.is_paused = False
+            else:
+                if w.button("Stop"):
+                    self.is_paused = True
 
     def render(self):
         self.canvas.set_background_color((0.054, 0.06, 0.09))
         self.canvas.circles(centers=self.position, radius=0.0016, color=(0.8, 0.8, 0.8))
         if self.should_write_to_disk:
-            self.window.save_image(f"{self.frame:06d}.png")
+            self.window.save_image(f".output/{self.directory}/{self.frame:06d}.png")
             self.frame += 1
         self.window.show()
 
