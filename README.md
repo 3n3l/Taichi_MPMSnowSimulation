@@ -5,8 +5,13 @@
 
 ![snowballHitsSnowball2](https://github.com/3n3l/Taichi_MPMSnowSimulation/assets/103253630/a3e70218-6251-48ce-ada6-531b5e5ed331)
 
-## Usage
+## Dependencies
+```
+conda env create --file=environment.yaml
+conda activate MPMSnowSimulation
+```
 
+## Usage
 ```
 python src/main.py [--help] [--hideSettings] [--writeFrames] [--configuration] [--paused]
 

@@ -1,0 +1,10 @@
+name: MPMSnowSimulation
+channels:
+  - defaults
+dependencies:
+  - python=3.11
+  - numpy
+  - pip
+  - pip:
+    - taichi==1.6.0
+
