@@ -166,3 +166,6 @@ ignore_me
 
 # Folder with written frames
 .output
+
+# Output from subwindow
+imgui.ini
