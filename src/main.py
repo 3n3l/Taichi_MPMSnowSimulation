@@ -83,9 +83,9 @@ def main():
     print("-" * 150)
     configuration_help = "\n".join([f"{i}: {c.name}" for i, c in enumerate(configurations)])
     p_epilog = "[Hint] Press R to reset, SPACE to pause/unpause the simulation!"
-    settings_help = "Show settings in subwindow."
-    paused_help = "Pause the simulation."
+    paused_help = "Pause the simulation in the beginning."
     write_help = "Write frames to disk."
+    settings_help = "Hide settings."
     parser = ArgumentParser(prog="main.py", epilog=p_epilog, formatter_class=RawTextHelpFormatter)
     parser.add_argument("--hideSettings", const=True, default=False, nargs="?", help=settings_help)
     parser.add_argument("--writeFrames", const=True, default=False, nargs="?", help=write_help)

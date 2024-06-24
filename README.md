@@ -17,9 +17,9 @@ python src/main.py [--help] [--hideSettings] [--writeFrames] [--configuration] [
 
 options:
   --help
-                        Show this help message and exit
+                        Show this help message and exit.
   --hideSettings
-                        Show settings in subwindow.
+                        Hide settings.
   --writeFrames
                         Write frames to disk.
   --configuration
