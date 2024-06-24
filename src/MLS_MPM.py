@@ -1,4 +1,4 @@
-from src.Configuration import Configuration
+from Configuration import Configuration
 from datetime import datetime
 import taichi as ti
 import os

@@ -1,6 +1,6 @@
 from argparse import ArgumentParser, RawTextHelpFormatter
-from src.Configuration import Configuration
-from src.MLS_MPM import Simulation
+from Configuration import Configuration
+from MLS_MPM import Simulation
 import taichi as ti
 import numpy as np
 

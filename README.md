@@ -8,7 +8,7 @@
 ## Usage
 
 ```
-python main.py [--help] [--hideSettings] [--writeFrames] [--configuration] [--paused]
+python src/main.py [--help] [--hideSettings] [--writeFrames] [--configuration] [--paused]
 
 options:
   --help
