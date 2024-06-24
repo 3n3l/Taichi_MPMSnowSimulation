@@ -5,9 +5,6 @@ import numpy as np
 from argparse import ArgumentParser, RawTextHelpFormatter
 
 
-ti.init(arch=ti.vulkan)
-
-
 def snowball_positions(position=[[0, 0]], n_particles=1000, radius=1.0):
     n_snowballs = len(position)
     group_size = n_particles // n_snowballs
@@ -33,6 +30,7 @@ def snowball_velocities(velocity=[[0, 0]], n_particles=1000):
 
 
 def main():
+    ti.init(arch=ti.gpu)
     quality = 3
     radius = 0.05
     n_particles = 2_000 * (quality**2)
