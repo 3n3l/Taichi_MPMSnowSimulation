@@ -124,7 +124,7 @@ class Simulation:
                     self.grid_velo[i, j][1] = 0
 
     @ti.kernel
-    def grid_to_particle(self, stickiness: float):
+    def grid_to_particle(self, stickiness: float, friction: float):
         for p in self.position:
             base = (self.position[p] * self.inv_dx - 0.5).cast(int)
             fx = self.position[p] * self.inv_dx - base.cast(float)
@@ -140,10 +140,13 @@ class Simulation:
                 new_C += 4 * self.inv_dx * weight * g_v.outer_product(dpos)
             # Dampen velocity if the particle is close to a boundary
             position = self.position[p]
-            particle_close_to_boundary = position[0] < 0.01 or position[0] > 0.99
-            particle_close_to_boundary |= position[1] < 0.01 or position[1] > 0.99
-            if particle_close_to_boundary:
+            collision_horizont = position[0] < 0.01 or position[0] > 0.99
+            collision_vertical = position[1] < 0.01 or position[1] > 0.99
+            if collision_horizont:
                 new_v[0] *= 1 / stickiness
+                new_v[1] *= 1 / friction
+            if collision_vertical:
+                new_v[0] *= 1 / friction
                 new_v[1] *= 1 / stickiness
             self.velocity[p], self.C[p] = new_v, new_C
             self.position[p] += self.dt * new_v  # advection
@@ -163,6 +166,7 @@ class Simulation:
         self.initial_velocity.from_numpy(self.configuration.velocity)
         # Save configuration variables, so these won't be overriden
         self.stickiness = self.configuration.stickiness
+        self.friction = self.configuration.friction
         self.theta_c = self.configuration.theta_c
         self.theta_s = self.configuration.theta_s
         self.zeta = self.configuration.zeta
@@ -184,7 +188,7 @@ class Simulation:
                 self.reset_grids()
                 self.particle_to_grid(self.lambda_0, self.mu_0, self.zeta, self.theta_c, self.theta_s)
                 self.momentum_to_velocity(self.stickiness)
-                self.grid_to_particle(self.stickiness)
+                self.grid_to_particle(self.stickiness, self.friction)
 
     def show_settings(self):
         if not self.should_show_settings:
@@ -192,6 +196,7 @@ class Simulation:
         with self.gui.sub_window("Settings", 0.01, 0.01, 0.98, 0.5) as w:
             # Parameters
             self.stickiness = w.slider_int(text="stickiness", old_value=self.stickiness, minimum=1, maximum=10)
+            self.friction = w.slider_int(text="friction", old_value=self.friction, minimum=1, maximum=10)
             self.theta_c = w.slider_float(text="theta_c", old_value=self.theta_c, minimum=0, maximum=5e-2)
             self.theta_s = w.slider_float(text="theta_s", old_value=self.theta_s, minimum=0, maximum=15e-3)
             self.zeta = w.slider_int(text="zeta", old_value=self.zeta, minimum=1, maximum=20)

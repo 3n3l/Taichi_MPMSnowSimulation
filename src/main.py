@@ -41,7 +41,8 @@ def main():
             zeta=10,  # Hardening coefficient (10)
             theta_c=2.5e-2,  # Critical compression (2.5e-2)
             theta_s=7.5e-3,  # Critical stretch (7.5e-3)
-            stickiness=10,  # The higher, the stickier the border
+            stickiness=8,  # Higher value means a stickier border
+            friction=8,  # Higher value means the border has more friction
             position=snowball_positions([[0.5, 0.5]], radii=[0.05], n_particles=n_particles),
             velocity=snowball_velocities([[5, 0]], n_particles=n_particles),
         ),
@@ -52,7 +53,8 @@ def main():
             zeta=10,  # Hardening coefficient (10)
             theta_c=2.5e-2,  # Critical compression (2.5e-2)
             theta_s=7.5e-3,  # Critical stretch (7.5e-3)
-            stickiness=1,  # The higher, the stickier the border
+            stickiness=1,  # Higher value means a stickier border
+            friction=1,  # Higher value means the border has more friction
             position=snowball_positions([[0.5, 0.5]], radii=[0.05], n_particles=n_particles),
             velocity=snowball_velocities([[5, 0]], n_particles=n_particles),
         ),
@@ -63,7 +65,8 @@ def main():
             zeta=10,  # Hardening coefficient (10)
             theta_c=2.5e-2,  # Critical compression (2.5e-2)
             theta_s=4.5e-3,  # Critical stretch (7.5e-3)
-            stickiness=10,  # The higher, the stickier the border
+            stickiness=8,  # Higher value means a stickier border
+            friction=8,  # Higher value means the border has more friction
             position=snowball_positions([[0.5, 0.5]], radii=[0.05], n_particles=n_particles),
             velocity=snowball_velocities([[0, 0]], n_particles=n_particles),
         ),
@@ -74,7 +77,8 @@ def main():
             zeta=10,  # Hardening coefficient (10)
             theta_c=2.5e-2,  # Critical compression (2.5e-2)
             theta_s=4.5e-3,  # Critical stretch (7.5e-3)
-            stickiness=4,  # The higher, the stickier the border
+            stickiness=1,  # Higher value means a stickier border
+            friction=8,  # Higher value means the border has more friction
             position=snowball_positions([[0.5, 0.5]], radii=[0.05], n_particles=n_particles),
             velocity=snowball_velocities([[0, 0]], n_particles=n_particles),
         ),
@@ -85,7 +89,8 @@ def main():
             zeta=8,  # Hardening coefficient (10)
             theta_c=1.5e-2,  # Critical compression (2.5e-2)
             theta_s=5.5e-3,  # Critical stretch (7.5e-3)
-            stickiness=2,  # The higher, the stickier the border
+            stickiness=2,  # Higher value means a stickier border
+            friction=8,  # Higher value means the border has more friction
             position=snowball_positions([[0.07, 0.595], [0.91, 0.615]], radii=[0.04, 0.06], n_particles=n_particles),
             velocity=snowball_velocities([[6, 0], [-3, 0]], n_particles=n_particles),
         ),
@@ -96,7 +101,8 @@ def main():
             zeta=5,  # Hardening coefficient (10)
             theta_c=2.5e-2,  # Critical compression (2.5e-2)
             theta_s=4.0e-3,  # Critical stretch (7.5e-3)
-            stickiness=2,  # The higher, the stickier the border
+            stickiness=2,  # Higher value means a stickier border
+            friction=8,  # Higher value means the border has more friction
             position=snowball_positions([[0.06, 0.5], [0.94, 0.53]], radii=[0.05, 0.05], n_particles=n_particles),
             velocity=snowball_velocities([[4, 0], [-4, 0]], n_particles=n_particles),
         ),
