@@ -182,31 +182,24 @@ class Simulation:
     def substep(self):
         if not self.is_paused:
             for _ in range(int(2e-3 // self.dt)):
-                nu = self.configuration.nu
-                E = self.configuration.E
-                zeta = self.configuration.zeta
-                stickiness = self.configuration.stickiness
-                theta_c = self.configuration.theta_c
-                theta_s = self.configuration.theta_s
-                mu_0 = E / (2 * (1 + nu))
-                lambda_0 = E * nu / ((1 + nu) * (1 - 2 * nu))
                 self.reset_grids()
-                self.particle_to_grid(lambda_0, mu_0, zeta, theta_c, theta_s)
-                self.momentum_to_velocity(stickiness)
-                self.grid_to_particle(stickiness)
+                self.particle_to_grid(self.lambda_0, self.mu_0, self.zeta, self.theta_c, self.theta_s)
+                self.momentum_to_velocity(self.stickiness)
+                self.grid_to_particle(self.stickiness)
 
     def show_settings(self):
         if not self.should_show_settings:
             return  # don't bother
         with self.gui.sub_window("Settings", 0.01, 0.01, 0.98, 0.5) as w:
             # Parameters
-            config = self.configuration
             self.stickiness = w.slider_int(text="stickiness", old_value=self.stickiness, minimum=1, maximum=10)
             self.theta_c = w.slider_float(text="theta_c", old_value=self.theta_c, minimum=0, maximum=5e-2)
             self.theta_s = w.slider_float(text="theta_s", old_value=self.theta_s, minimum=0, maximum=15e-3)
             self.zeta = w.slider_int(text="zeta", old_value=self.zeta, minimum=1, maximum=20)
             self.nu = w.slider_float(text="nu", old_value=self.nu, minimum=0, maximum=1)
             self.E = w.slider_float(text="E", old_value=self.E, minimum=4.8e4, maximum=4.8e5)
+            self.mu_0 = self.E / (2 * (1 + self.nu))
+            self.lambda_0 = self.E * self.nu / ((1 + self.nu) * (1 - 2 * self.nu))
             # Configurations
             prev_configuration_id = self.configuration_id
             for i in range(len(self.configurations)):
@@ -214,6 +207,8 @@ class Simulation:
                 if w.checkbox(name, self.configuration_id == i):
                     self.configuration_id = i
             if self.configuration_id != prev_configuration_id:
+                _id = self.configuration_id
+                self.configuration = self.configurations[_id]
                 self.load_configuration()
                 self.reset_particles()
                 self.is_paused = True
