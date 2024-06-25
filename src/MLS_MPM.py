@@ -40,12 +40,11 @@ class Simulation:
         self.should_write_to_disk = should_write_to_disk
         self.frame = 0  # for writing this to disk
         # Create folders to dump the frames
-        if should_write_to_disk:
-            self.directory = datetime.now().strftime("%d%m%Y_%H%M")
-            if not os.path.exists(".output"):
-                os.makedirs(".output")
-            if not os.path.exists(f".output/{self.directory}"):
-                os.makedirs(f".output/{self.directory}")
+        self.directory = datetime.now().strftime("%d%m%Y_%H%M")
+        if not os.path.exists(".output"):
+            os.makedirs(".output")
+        if not os.path.exists(f".output/{self.directory}"):
+            os.makedirs(f".output/{self.directory}")
 
         # Fields
         self.grid_velo = ti.Vector.field(2, dtype=float, shape=(self.n_grid, self.n_grid))
@@ -240,7 +239,6 @@ class Simulation:
         self.window.show()
 
     def run(self):
-        self.load_configuration()
         self.reset_particles()
         while self.window.running:
             self.handle_events()
