@@ -11,11 +11,6 @@ class Simulation:
         quality: int,
         n_particles: int,
         configurations: list[Configuration],
-        should_show_settings=False,
-        should_write_to_disk=False,
-        initial_gravity=[0, 0],  # Gravity of the simulation ([0, 0])
-        configuration_id=0,
-        is_paused=False,
     ):
         # MPM Parameters that are configuration independent
         self.quality = quality
@@ -30,15 +25,12 @@ class Simulation:
 
         # Parameters to control the simulation
         self.window = ti.ui.Window(name="MLS-MPM", res=(720, 720), fps_limit=60)
-        self.canvas = self.window.get_canvas()
         self.gui = self.window.get_gui()
-        self.is_paused = is_paused
-        self.configurations = configurations
-        self.initial_gravity = initial_gravity
-        self.configuration_id = configuration_id
-        self.should_show_settings = should_show_settings
-        self.should_write_to_disk = should_write_to_disk
-        self.frame = 0  # for writing this to disk
+        self.canvas = self.window.get_canvas()
+        self.frame = 0
+        self.is_paused = False
+        self.should_write_to_disk = False
+        self.is_showing_settings = not self.is_paused
         # Create folders to dump the frames
         self.directory = datetime.now().strftime("%d%m%Y_%H%M")
         if not os.path.exists(".output"):
@@ -59,7 +51,9 @@ class Simulation:
         self.gravity = ti.Vector.field(2, dtype=float, shape=())
 
         # Load the initial configuration
-        self.configuration = configurations[configuration_id]
+        self.configuration_id = 0
+        self.configurations = configurations
+        self.configuration = configurations[self.configuration_id]
         self.load_configuration()
 
     @ti.kernel
@@ -153,7 +147,7 @@ class Simulation:
 
     @ti.kernel
     def reset_particles(self):
-        self.gravity[None] = self.initial_gravity
+        self.gravity[None] = [0, -9.8]
         for i in range(self.n_particles):
             self.position[i] = self.initial_position[i]
             self.velocity[i] = self.initial_velocity[i]
@@ -195,8 +189,10 @@ class Simulation:
                 self.grid_to_particle(self.stickiness, self.friction)
 
     def show_settings(self):
-        if not self.should_show_settings or not self.is_paused:
+        if not self.is_paused:
+            self.is_showing_settings = False
             return  # don't bother
+        self.is_showing_settings = True
         with self.gui.sub_window("Settings", 0.01, 0.01, 0.98, 0.98) as w:
             # Parameters
             self.stickiness = w.slider_int(text="stickiness", old_value=self.stickiness, minimum=1, maximum=10)
@@ -206,8 +202,8 @@ class Simulation:
             self.zeta = w.slider_int(text="zeta", old_value=self.zeta, minimum=1, maximum=20)
             self.nu = w.slider_float(text="nu", old_value=self.nu, minimum=0, maximum=1)
             self.E = w.slider_float(text="E", old_value=self.E, minimum=4.8e4, maximum=4.8e5)
-            self.mu_0 = self.E / (2 * (1 + self.nu))
             self.lambda_0 = self.E * self.nu / ((1 + self.nu) * (1 - 2 * self.nu))
+            self.mu_0 = self.E / (2 * (1 + self.nu))
             # Configurations
             prev_configuration_id = self.configuration_id
             for i in range(len(self.configurations)):
@@ -237,7 +233,7 @@ class Simulation:
     def render(self):
         self.canvas.set_background_color((0.054, 0.06, 0.09))
         self.canvas.circles(centers=self.position, radius=0.0016, color=(0.8, 0.8, 0.8))
-        if self.should_write_to_disk and not self.is_paused:
+        if self.should_write_to_disk and not self.is_paused and not self.is_showing_settings:
             self.window.save_image(f".output/{self.directory}/{self.frame:06d}.png")
             self.frame += 1
         self.window.show()

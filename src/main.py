@@ -1,4 +1,3 @@
-from argparse import ArgumentParser, RawTextHelpFormatter
 from Configuration import Configuration
 from MLS_MPM import Simulation
 import taichi as ti
@@ -109,30 +108,10 @@ def main():
     ]
 
     print("-" * 150)
-    configuration_help = "\n".join([f"{i}: {c.name}" for i, c in enumerate(configurations)])
-    p_epilog = "[Hint] Press R to reset, SPACE to pause/unpause the simulation!"
-    paused_help = "Pause the simulation in the beginning."
-    write_help = "Write frames to disk."
-    settings_help = "Hide settings."
-    parser = ArgumentParser(prog="main.py", epilog=p_epilog, formatter_class=RawTextHelpFormatter)
-    parser.add_argument("--hideSettings", const=True, default=False, nargs="?", help=settings_help)
-    parser.add_argument("--writeFrames", const=True, default=False, nargs="?", help=write_help)
-    parser.add_argument("--initialConfiguration", default=0, nargs="?", help=configuration_help, type=int)
-    parser.add_argument("--startImmediately", const=True, default=True, nargs="?", help=paused_help)
-    args = parser.parse_args()
-    parser.print_help()
+    print("[Hint] Press R to [R]eset, P|SPACE to pause/unpause the simulation and S|BACKSPACE to [S]tart recording!")
     print("-" * 150)
 
-    simulation = Simulation(
-        quality=quality,
-        n_particles=n_particles,
-        initial_gravity=[0, -9.8],
-        configurations=configurations,
-        should_write_to_disk=args.writeFrames,
-        should_show_settings=(not args.hideSettings),
-        configuration_id=args.initialConfiguration,
-        is_paused=args.startImmediately,
-    )
+    simulation = Simulation(quality=quality, n_particles=n_particles, configurations=configurations)
     simulation.run()
 
 

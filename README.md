@@ -13,22 +13,5 @@ conda activate MPMSnowSimulation
 
 ## Usage
 ```
-python src/main.py [--help] [--hideSettings] [--writeFrames] [--configuration] [--paused]
-
-options:
-  --help
-                        Show this help message and exit.
-  --hideSettings
-                        Hide settings.
-  --writeFrames
-                        Write frames to disk.
-  --configuration
-                        0: Snowball hits wall
-                        1: Snowball hits ground
-                        2: Snowball hits snowball [1]
-                        3: Snowball hits snowball [2]
-  --paused
-                        Pause the simulation in the beginning.
-
-[Hint] Press R to reset, SPACE to pause/unpause the simulation!
+python src/main.py
 ```
