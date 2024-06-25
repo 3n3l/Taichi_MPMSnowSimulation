@@ -106,7 +106,7 @@ class Simulation:
                 self.grid_mass[base + offset] += weight * self.p_mass
 
     @ti.kernel
-    def momentum_to_velocity(self, stickiness: float):
+    def momentum_to_velocity(self, friction: float):
         for i, j in self.grid_mass:
             if self.grid_mass[i, j] > 0:  # No need for epsilon here
                 self.grid_velo[i, j] = (1 / self.grid_mass[i, j]) * self.grid_velo[i, j]
@@ -116,11 +116,11 @@ class Simulation:
                 collision_right = i > (self.n_grid - 3) and self.grid_velo[i, j][0] > 0
                 if collision_left or collision_right:
                     self.grid_velo[i, j][0] = 0
-                    self.grid_velo[i, j][1] *= 1 / stickiness
+                    self.grid_velo[i, j][1] *= 1 / friction
                 collision_top = j < 3 and self.grid_velo[i, j][1] < 0
                 collision_bottom = j > (self.n_grid - 3) and self.grid_velo[i, j][1] > 0
                 if collision_top or collision_bottom:
-                    self.grid_velo[i, j][0] *= 1 / stickiness
+                    self.grid_velo[i, j][0] *= 1 / friction
                     self.grid_velo[i, j][1] = 0
 
     @ti.kernel
@@ -167,9 +167,11 @@ class Simulation:
         # Save configuration variables, so these won't be overriden
         self.stickiness = self.configuration.stickiness
         self.friction = self.configuration.friction
+        self.lambda_0 = self.configuration.lambda_0
         self.theta_c = self.configuration.theta_c
         self.theta_s = self.configuration.theta_s
         self.zeta = self.configuration.zeta
+        self.mu_0 = self.configuration.mu_0
         self.nu = self.configuration.nu
         self.E = self.configuration.E
 
@@ -177,6 +179,8 @@ class Simulation:
         if self.window.get_event(ti.ui.PRESS):
             if self.window.event.key == "r":
                 self.reset_particles()
+            elif self.window.event.key in [ti.GUI.BACKSPACE, "s"]:
+                self.should_write_to_disk = not self.should_write_to_disk
             elif self.window.event.key in [ti.GUI.SPACE, "p"]:
                 self.is_paused = not self.is_paused
             elif self.window.event.key in [ti.GUI.ESCAPE, ti.GUI.EXIT]:
@@ -187,13 +191,13 @@ class Simulation:
             for _ in range(int(2e-3 // self.dt)):
                 self.reset_grids()
                 self.particle_to_grid(self.lambda_0, self.mu_0, self.zeta, self.theta_c, self.theta_s)
-                self.momentum_to_velocity(self.stickiness)
+                self.momentum_to_velocity(self.friction)
                 self.grid_to_particle(self.stickiness, self.friction)
 
     def show_settings(self):
-        if not self.should_show_settings:
+        if not self.should_show_settings or not self.is_paused:
             return  # don't bother
-        with self.gui.sub_window("Settings", 0.01, 0.01, 0.98, 0.5) as w:
+        with self.gui.sub_window("Settings", 0.01, 0.01, 0.98, 0.98) as w:
             # Parameters
             self.stickiness = w.slider_int(text="stickiness", old_value=self.stickiness, minimum=1, maximum=10)
             self.friction = w.slider_int(text="friction", old_value=self.friction, minimum=1, maximum=10)
@@ -218,27 +222,22 @@ class Simulation:
                 self.is_paused = True
             # Write to disk
             if self.should_write_to_disk:
-                if w.button("Stop recording"):
+                if w.button(" Stop recording  "):
                     self.should_write_to_disk = False
             else:
-                if w.button("Start recording"):
+                if w.button(" Start recording "):
                     self.should_write_to_disk = True
             # Reset
-            if w.button("Reset"):
+            if w.button(" Reset Particles "):
                 self.reset_particles()
-                self.is_paused = True
             # Pause/Unpause
-            if self.is_paused:
-                if w.button("Play"):
-                    self.is_paused = False
-            else:
-                if w.button("Stop"):
-                    self.is_paused = True
+            if w.button(" Start Simulation"):
+                self.is_paused = False
 
     def render(self):
         self.canvas.set_background_color((0.054, 0.06, 0.09))
         self.canvas.circles(centers=self.position, radius=0.0016, color=(0.8, 0.8, 0.8))
-        if self.should_write_to_disk:
+        if self.should_write_to_disk and not self.is_paused:
             self.window.save_image(f".output/{self.directory}/{self.frame:06d}.png")
             self.frame += 1
         self.window.show()

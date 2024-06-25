@@ -40,8 +40,8 @@ def main():
             nu=0.2,  # Poisson's ratio (0.2)
             zeta=10,  # Hardening coefficient (10)
             theta_c=2.5e-2,  # Critical compression (2.5e-2)
-            theta_s=7.5e-3,  # Critical stretch (7.5e-3)
-            stickiness=8,  # Higher value means a stickier border
+            theta_s=5.0e-3,  # Critical stretch (7.5e-3)
+            stickiness=4,  # Higher value means a stickier border
             friction=8,  # Higher value means the border has more friction
             position=snowball_positions([[0.5, 0.5]], radii=[0.05], n_particles=n_particles),
             velocity=snowball_velocities([[5, 0]], n_particles=n_particles),
@@ -117,8 +117,8 @@ def main():
     parser = ArgumentParser(prog="main.py", epilog=p_epilog, formatter_class=RawTextHelpFormatter)
     parser.add_argument("--hideSettings", const=True, default=False, nargs="?", help=settings_help)
     parser.add_argument("--writeFrames", const=True, default=False, nargs="?", help=write_help)
-    parser.add_argument("--configuration", default=0, nargs="?", help=configuration_help, type=int)
-    parser.add_argument("--paused", const=True, default=False, nargs="?", help=paused_help)
+    parser.add_argument("--initialConfiguration", default=0, nargs="?", help=configuration_help, type=int)
+    parser.add_argument("--startImmediately", const=True, default=True, nargs="?", help=paused_help)
     args = parser.parse_args()
     parser.print_help()
     print("-" * 150)
@@ -127,11 +127,11 @@ def main():
         quality=quality,
         n_particles=n_particles,
         initial_gravity=[0, -9.8],
+        configurations=configurations,
         should_write_to_disk=args.writeFrames,
         should_show_settings=(not args.hideSettings),
-        configuration_id=args.configuration,
-        configurations=configurations,
-        is_paused=args.paused,
+        configuration_id=args.initialConfiguration,
+        is_paused=args.startImmediately,
     )
     simulation.run()
 
