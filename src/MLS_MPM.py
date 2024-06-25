@@ -28,7 +28,7 @@ class Simulation:
         self.gui = self.window.get_gui()
         self.canvas = self.window.get_canvas()
         self.frame = 0
-        self.is_paused = False
+        self.is_paused = True
         self.should_write_to_disk = False
         self.is_showing_settings = not self.is_paused
         # Create folders to dump the frames
