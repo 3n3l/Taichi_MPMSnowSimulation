@@ -1,11 +1,13 @@
 # YAML 1.2
 ---
 authors:
-  -
-    name: "Niklas Nell, 3n3l"
+  - family-names: "Nell"
+    given-names: "Niklas"
 cff-version: "1.2.0"
 date-released: 2024-06-26
 license: GPL-3.0
-title: MPM snow simulation, written in Taichi
+title: Taichi_MPMSnowSimulation
 url: "https://github.com/3n3l/Taichi_MPMSnowSimulation"
+message: "If you use this software, please cite it as below."
+version: 1.0.0
 ...
