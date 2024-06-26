@@ -100,7 +100,7 @@ class Simulation:
                 self.grid_mass[base + offset] += weight * self.p_mass
 
     @ti.kernel
-    def momentum_to_velocity(self, friction: float):
+    def momentum_to_velocity(self):
         for i, j in self.grid_mass:
             if self.grid_mass[i, j] > 0:  # No need for epsilon here
                 self.grid_velo[i, j] = (1 / self.grid_mass[i, j]) * self.grid_velo[i, j]
@@ -110,11 +110,9 @@ class Simulation:
                 collision_right = i > (self.n_grid - 3) and self.grid_velo[i, j][0] > 0
                 if collision_left or collision_right:
                     self.grid_velo[i, j][0] = 0
-                    self.grid_velo[i, j][1] *= 1 / friction
                 collision_top = j < 3 and self.grid_velo[i, j][1] < 0
                 collision_bottom = j > (self.n_grid - 3) and self.grid_velo[i, j][1] > 0
                 if collision_top or collision_bottom:
-                    self.grid_velo[i, j][0] *= 1 / friction
                     self.grid_velo[i, j][1] = 0
 
     @ti.kernel
@@ -185,7 +183,7 @@ class Simulation:
             for _ in range(int(2e-3 // self.dt)):
                 self.reset_grids()
                 self.particle_to_grid(self.lambda_0, self.mu_0, self.zeta, self.theta_c, self.theta_s)
-                self.momentum_to_velocity(self.friction)
+                self.momentum_to_velocity()
                 self.grid_to_particle(self.stickiness, self.friction)
 
     def show_settings(self):
@@ -232,7 +230,7 @@ class Simulation:
 
     def render(self):
         self.canvas.set_background_color((0.054, 0.06, 0.09))
-        self.canvas.circles(centers=self.position, radius=0.0016, color=(0.8, 0.8, 0.8))
+        self.canvas.circles(centers=self.position, radius=0.0018, color=(0.8, 0.8, 0.8))
         if self.should_write_to_disk and not self.is_paused and not self.is_showing_settings:
             self.window.save_image(f".output/{self.directory}/{self.frame:06d}.png")
             self.frame += 1
