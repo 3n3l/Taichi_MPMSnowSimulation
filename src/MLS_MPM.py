@@ -100,7 +100,7 @@ class Simulation:
                 self.grid_mass[base + offset] += weight * self.p_mass
 
     @ti.kernel
-    def momentum_to_velocity(self):
+    def momentum_to_velocity(self, friction: int):
         for i, j in self.grid_mass:
             if self.grid_mass[i, j] > 0:  # No need for epsilon here
                 self.grid_velo[i, j] = (1 / self.grid_mass[i, j]) * self.grid_velo[i, j]
@@ -110,38 +110,42 @@ class Simulation:
                 collision_right = i > (self.n_grid - 3) and self.grid_velo[i, j][0] > 0
                 if collision_left or collision_right:
                     self.grid_velo[i, j][0] = 0
+                    self.grid_velo[i, j][1] *= 1 / friction
                 collision_top = j < 3 and self.grid_velo[i, j][1] < 0
                 collision_bottom = j > (self.n_grid - 3) and self.grid_velo[i, j][1] > 0
                 if collision_top or collision_bottom:
+                    self.grid_velo[i, j][0] *= 1 / friction
                     self.grid_velo[i, j][1] = 0
 
     @ti.kernel
-    def grid_to_particle(self, stickiness: float, friction: float):
+    def grid_to_particle(self, friction: float):
         for p in self.position:
             base = (self.position[p] * self.inv_dx - 0.5).cast(int)
             fx = self.position[p] * self.inv_dx - base.cast(float)
             w = [0.5 * (1.5 - fx) ** 2, 0.75 - (fx - 1.0) ** 2, 0.5 * (fx - 0.5) ** 2]
-            new_v = ti.Vector.zero(float, 2)
-            new_C = ti.Matrix.zero(float, 2, 2)
+            velocity = ti.Vector.zero(float, 2)
+            C = ti.Matrix.zero(float, 2, 2)
             for i, j in ti.static(ti.ndrange(3, 3)):
                 # Loop over 3x3 grid node neighborhood
                 dpos = ti.Vector([i, j]).cast(float) - fx
                 g_v = self.grid_velo[base + ti.Vector([i, j])]
                 weight = w[i][0] * w[j][1]
-                new_v += weight * g_v
-                new_C += 4 * self.inv_dx * weight * g_v.outer_product(dpos)
-            # Dampen velocity if the particle is close to a boundary
+                velocity += weight * g_v
+                C += 4 * self.inv_dx * weight * g_v.outer_product(dpos)
+            # Boundary conditions for the particle velocities
             position = self.position[p]
-            collision_horizont = position[0] < 0.01 or position[0] > 0.99
-            collision_vertical = position[1] < 0.01 or position[1] > 0.99
-            if collision_horizont:
-                new_v[0] *= 1 / stickiness
-                new_v[1] *= 1 / friction
-            if collision_vertical:
-                new_v[0] *= 1 / friction
-                new_v[1] *= 1 / stickiness
-            self.velocity[p], self.C[p] = new_v, new_C
-            self.position[p] += self.dt * new_v  # advection
+            collision_left = position[0] < 0.01
+            collision_right = position[0] > 0.99
+            if collision_left or collision_right:
+                velocity[0] = 0
+                velocity[1] *= 1 / friction
+            collision_top = position[1] > 0.99
+            collision_bottom = position[1] < 0.01
+            if collision_top or collision_bottom:
+                velocity[0] *= 1 / friction
+                velocity[1] = 0
+            self.velocity[p], self.C[p] = velocity, C
+            self.position[p] += self.dt * velocity  # advection
 
     @ti.kernel
     def reset_particles(self):
@@ -183,8 +187,8 @@ class Simulation:
             for _ in range(int(2e-3 // self.dt)):
                 self.reset_grids()
                 self.particle_to_grid(self.lambda_0, self.mu_0, self.zeta, self.theta_c, self.theta_s)
-                self.momentum_to_velocity()
-                self.grid_to_particle(self.stickiness, self.friction)
+                self.momentum_to_velocity(self.friction)
+                self.grid_to_particle(self.friction)
 
     def show_settings(self):
         if not self.is_paused:
@@ -230,7 +234,7 @@ class Simulation:
 
     def render(self):
         self.canvas.set_background_color((0.054, 0.06, 0.09))
-        self.canvas.circles(centers=self.position, radius=0.0018, color=(0.8, 0.8, 0.8))
+        self.canvas.circles(centers=self.position, radius=0.0015, color=(0.8, 0.8, 0.8))
         if self.should_write_to_disk and not self.is_paused and not self.is_showing_settings:
             self.window.save_image(f".output/{self.directory}/{self.frame:06d}.png")
             self.frame += 1
