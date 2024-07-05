@@ -14,8 +14,8 @@ class Configuration:
         nu=0.2,  # Poisson's ratio (0.2)
         E=1.4e5,  # Young's modulus (1.4e5)
         zeta=10,  # Hardening coefficient (10)
-        stickiness=1,  # Higher value means a stickier border
-        friction=1,  # Higher value means the border has more friction
+        stickiness=1.0,  # Higher value means a stickier border
+        friction=1.0,  # Higher value means the border has more friction
         theta_c=2.5e-2,  # Critical compression (2.5e-2)
         theta_s=7.5e-3,  # Critical stretch (7.5e-3)
     ):

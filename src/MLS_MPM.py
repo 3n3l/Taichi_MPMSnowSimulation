@@ -73,7 +73,7 @@ class Simulation:
             self.F[p] = (ti.Matrix.identity(float, 2) + self.dt * self.C[p]) @ self.F[p]
             # Hardening coefficient: snow gets harder when compressed,
             # clamp this to stop the rebound from compressed snow
-            h = ti.max(0.1, ti.min(zeta, ti.exp(zeta * (1.0 - self.Jp[p]))))
+            h = ti.max(0.1, ti.min(5, ti.exp(zeta * (1.0 - self.Jp[p]))))
             mu, la = mu_0 * h, lambda_0 * h
             U, sigma, V = ti.svd(self.F[p])
             J = 1.0
@@ -100,7 +100,7 @@ class Simulation:
                 self.grid_mass[base + offset] += weight * self.p_mass
 
     @ti.kernel
-    def momentum_to_velocity(self, friction: int):
+    def momentum_to_velocity(self, friction: float):
         for i, j in self.grid_mass:
             if self.grid_mass[i, j] > 0:  # No need for epsilon here
                 self.grid_velo[i, j] = (1 / self.grid_mass[i, j]) * self.grid_velo[i, j]
@@ -118,34 +118,34 @@ class Simulation:
                     self.grid_velo[i, j][1] = 0
 
     @ti.kernel
-    def grid_to_particle(self, friction: float):
+    def grid_to_particle(self, stickiness: float, friction: float):
         for p in self.position:
             base = (self.position[p] * self.inv_dx - 0.5).cast(int)
             fx = self.position[p] * self.inv_dx - base.cast(float)
             w = [0.5 * (1.5 - fx) ** 2, 0.75 - (fx - 1.0) ** 2, 0.5 * (fx - 0.5) ** 2]
-            velocity = ti.Vector.zero(float, 2)
-            C = ti.Matrix.zero(float, 2, 2)
+            n_velocity = ti.Vector.zero(float, 2)
+            n_C = ti.Matrix.zero(float, 2, 2)
             for i, j in ti.static(ti.ndrange(3, 3)):
                 # Loop over 3x3 grid node neighborhood
                 dpos = ti.Vector([i, j]).cast(float) - fx
                 g_v = self.grid_velo[base + ti.Vector([i, j])]
                 weight = w[i][0] * w[j][1]
-                velocity += weight * g_v
-                C += 4 * self.inv_dx * weight * g_v.outer_product(dpos)
+                n_velocity += weight * g_v
+                n_C += 4 * self.inv_dx * weight * g_v.outer_product(dpos)
             # Boundary conditions for the particle velocities
-            position = self.position[p]
-            collision_left = position[0] < 0.01
-            collision_right = position[0] > 0.99
+            n_position = (self.position[p] + (self.dt * n_velocity)) * self.n_grid
+            collision_left = n_position[0] < 3
+            collision_right = n_position[0] > self.n_grid - 3
             if collision_left or collision_right:
-                velocity[0] = 0
-                velocity[1] *= 1 / friction
-            collision_top = position[1] > 0.99
-            collision_bottom = position[1] < 0.01
+                n_velocity[0] *= 1 / stickiness
+                n_velocity[1] *= 1 / friction
+            collision_bottom = n_position[1] < 3
+            collision_top = n_position[1] > self.n_grid - 3
             if collision_top or collision_bottom:
-                velocity[0] *= 1 / friction
-                velocity[1] = 0
-            self.velocity[p], self.C[p] = velocity, C
-            self.position[p] += self.dt * velocity  # advection
+                n_velocity[0] *= 1 / friction
+                n_velocity[1] *= 1 / stickiness
+            self.velocity[p], self.C[p] = n_velocity, n_C
+            self.position[p] += self.dt * n_velocity  # advection
 
     @ti.kernel
     def reset_particles(self):
@@ -188,7 +188,7 @@ class Simulation:
                 self.reset_grids()
                 self.particle_to_grid(self.lambda_0, self.mu_0, self.zeta, self.theta_c, self.theta_s)
                 self.momentum_to_velocity(self.friction)
-                self.grid_to_particle(self.friction)
+                self.grid_to_particle(stickiness=self.stickiness, friction=self.friction)
 
     def show_settings(self):
         if not self.is_paused:
@@ -197,8 +197,8 @@ class Simulation:
         self.is_showing_settings = True
         with self.gui.sub_window("Settings", 0.01, 0.01, 0.98, 0.98) as w:
             # Parameters
-            self.stickiness = w.slider_int(text="stickiness", old_value=self.stickiness, minimum=1, maximum=10)
-            self.friction = w.slider_int(text="friction", old_value=self.friction, minimum=1, maximum=10)
+            self.stickiness = w.slider_float(text="stickiness", old_value=self.stickiness, minimum=1.0, maximum=5.0)
+            self.friction = w.slider_float(text="friction", old_value=self.friction, minimum=1.0, maximum=5.0)
             self.theta_c = w.slider_float(text="theta_c", old_value=self.theta_c, minimum=0, maximum=5e-2)
             self.theta_s = w.slider_float(text="theta_s", old_value=self.theta_s, minimum=0, maximum=15e-3)
             self.zeta = w.slider_int(text="zeta", old_value=self.zeta, minimum=1, maximum=20)
