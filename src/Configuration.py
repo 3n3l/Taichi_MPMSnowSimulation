@@ -10,6 +10,7 @@ class Configuration:
         self,
         velocity: np.ndarray,
         position: np.ndarray,
+        color: np.ndarray,
         name: str,
         nu=0.2,  # Poisson's ratio (0.2)
         E=1.4e5,  # Young's modulus (1.4e5)
@@ -27,6 +28,7 @@ class Configuration:
         self.group_size = position.shape[0]
         self.velocity = velocity
         self.position = position
+        self.color = color
         self.E = E
         self.nu = nu
         self.name = name

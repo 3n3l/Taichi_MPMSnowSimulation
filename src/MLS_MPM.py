@@ -45,6 +45,7 @@ class Simulation:
         self.initial_velocity = ti.Vector.field(2, dtype=float, shape=self.n_particles)
         self.position = ti.Vector.field(2, dtype=float, shape=self.n_particles)
         self.velocity = ti.Vector.field(2, dtype=float, shape=self.n_particles)
+        self.color = ti.Vector.field(3, dtype=float, shape=self.n_particles)
         self.C = ti.Matrix.field(2, 2, dtype=float, shape=self.n_particles)  # affine velocity field
         self.F = ti.Matrix.field(2, 2, dtype=float, shape=self.n_particles)  # deformation gradient
         self.Jp = ti.field(dtype=float, shape=self.n_particles)  # plastic deformation
@@ -160,6 +161,7 @@ class Simulation:
     def load_configuration(self):
         self.initial_position.from_numpy(self.configuration.position)
         self.initial_velocity.from_numpy(self.configuration.velocity)
+        self.color.from_numpy(self.configuration.color)
         # Save configuration variables, so these won't be overriden
         self.stickiness = self.configuration.stickiness
         self.friction = self.configuration.friction
@@ -234,7 +236,7 @@ class Simulation:
 
     def render(self):
         self.canvas.set_background_color((0.054, 0.06, 0.09))
-        self.canvas.circles(centers=self.position, radius=0.0015, color=(0.8, 0.8, 0.8))
+        self.canvas.circles(centers=self.position, radius=0.0015, per_vertex_color=self.color)
         if self.should_write_to_disk and not self.is_paused and not self.is_showing_settings:
             self.window.save_image(f".output/{self.directory}/{self.frame:06d}.png")
             self.frame += 1
