@@ -20,11 +20,11 @@ def snowball_positions(positions=[[0, 0]], radii=[0.5], n_particles=1000):
 def map_to_snowball(to_map=[[0, 0]], n_particles=1000):
     n_snowballs = len(to_map)
     group_size = n_particles // n_snowballs
-    v = np.zeros(shape=(n_particles, len(to_map[0])), dtype=np.float32)
+    m = np.zeros(shape=(n_particles, len(to_map[0])), dtype=np.float32)
     for i in range(n_particles):
         j = i // group_size
-        v[i] = to_map[j]
-    return v
+        m[i] = to_map[j]
+    return m
 
 
 def main():
@@ -121,10 +121,23 @@ def main():
             friction=2,  # Higher value means the border has more friction
             position=snowball_positions([[0.08, 0.5], [0.92, 0.53]], radii=[0.06, 0.06], n_particles=n_particles),
             color=map_to_snowball([[0.9, 0.9, 0.9], [0.9, 0.9, 0.9]], n_particles=n_particles),
-            velocity=map_to_snowball([[4, 0], [-4, 0]], n_particles=n_particles),
+            velocity=map_to_snowball([[8, 0], [-8, 0]], n_particles=n_particles),
         ),
         Configuration(
-            name="Snowball hits snowball (colored) [3]",
+            name="Snowball hits snowball (colored) [2]",
+            E=1.4e5,  # Young's modulus (1.4e5)
+            nu=0.2,  # Poisson's ratio (0.2)
+            zeta=10,  # Hardening coefficient (10)
+            theta_c=2.5e-2,  # Critical compression (2.5e-2)
+            theta_s=5.0e-3,  # Critical stretch (7.5e-3)
+            stickiness=2,  # Higher value means a stickier border
+            friction=2,  # Higher value means the border has more friction
+            position=snowball_positions([[0.08, 0.5], [0.92, 0.53]], radii=[0.06, 0.06], n_particles=n_particles),
+            color=map_to_snowball([[1, 0.5, 0.5], [0.5, 0.5, 1]], n_particles=n_particles),
+            velocity=map_to_snowball([[8, 0], [-8, 0]], n_particles=n_particles),
+        ),
+        Configuration(
+            name="Snowball hits snowball (colored, high velocity) [3]",
             E=1.4e5,  # Young's modulus (1.4e5)
             nu=0.2,  # Poisson's ratio (0.2)
             zeta=5,  # Hardening coefficient (10)
@@ -132,9 +145,35 @@ def main():
             theta_s=4.0e-3,  # Critical stretch (7.5e-3)
             stickiness=2,  # Higher value means a stickier border
             friction=2,  # Higher value means the border has more friction
-            position=snowball_positions([[0.08, 0.5], [0.92, 0.53]], radii=[0.06, 0.06], n_particles=n_particles),
+            position=snowball_positions([[0.08, 0.5], [0.92, 0.51]], radii=[0.06, 0.06], n_particles=n_particles),
             color=map_to_snowball([[1, 0.5, 0.5], [0.5, 0.5, 1]], n_particles=n_particles),
-            velocity=map_to_snowball([[4, 0], [-4, 0]], n_particles=n_particles),
+            velocity=map_to_snowball([[15, 0], [-15, 0]], n_particles=n_particles),
+        ),
+        Configuration(
+            name="Snowball hits giant snowball",
+            E=1.4e5,  # Young's modulus (1.4e5)
+            nu=0.2,  # Poisson's ratio (0.2)
+            zeta=5,  # Hardening coefficient (10)
+            theta_c=2.5e-2,  # Critical compression (2.5e-2)
+            theta_s=4.0e-3,  # Critical stretch (7.5e-3)
+            stickiness=2,  # Higher value means a stickier border
+            friction=2,  # Higher value means the border has more friction
+            position=snowball_positions([[0.08, 0.5], [0.79, 0.51]], radii=[0.05, 0.15], n_particles=n_particles),
+            color=map_to_snowball([[0.9, 0.9, 0.9], [0.9, 0.9, 0.9]], n_particles=n_particles),
+            velocity=map_to_snowball([[10, 0], [-1, 0]], n_particles=n_particles),
+        ),
+        Configuration(
+            name="Snowball hits giant snowball (colored)",
+            E=1.4e5,  # Young's modulus (1.4e5)
+            nu=0.2,  # Poisson's ratio (0.2)
+            zeta=5,  # Hardening coefficient (10)
+            theta_c=2.5e-2,  # Critical compression (2.5e-2)
+            theta_s=4.0e-3,  # Critical stretch (7.5e-3)
+            stickiness=2,  # Higher value means a stickier border
+            friction=2,  # Higher value means the border has more friction
+            position=snowball_positions([[0.08, 0.5], [0.79, 0.51]], radii=[0.05, 0.15], n_particles=n_particles),
+            color=map_to_snowball([[1, 0.5, 0.5], [0.5, 0.5, 1]], n_particles=n_particles),
+            velocity=map_to_snowball([[10, 0], [-1, 0]], n_particles=n_particles),
         ),
     ]
 
