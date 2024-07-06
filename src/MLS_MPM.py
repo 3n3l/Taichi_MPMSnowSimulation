@@ -201,11 +201,11 @@ class Simulation:
             # Parameters
             self.stickiness = w.slider_float(text="stickiness", old_value=self.stickiness, minimum=1.0, maximum=5.0)
             self.friction = w.slider_float(text="friction", old_value=self.friction, minimum=1.0, maximum=5.0)
-            self.theta_c = w.slider_float(text="theta_c", old_value=self.theta_c, minimum=0, maximum=5e-2)
-            self.theta_s = w.slider_float(text="theta_s", old_value=self.theta_s, minimum=0, maximum=15e-3)
-            self.zeta = w.slider_int(text="zeta", old_value=self.zeta, minimum=1, maximum=20)
-            self.nu = w.slider_float(text="nu", old_value=self.nu, minimum=0, maximum=1)
-            self.E = w.slider_float(text="E", old_value=self.E, minimum=4.8e4, maximum=4.8e5)
+            self.theta_c = w.slider_float(text="theta_c", old_value=self.theta_c, minimum=1.25e-2, maximum=5e-2)
+            self.theta_s = w.slider_float(text="theta_s", old_value=self.theta_s, minimum=5.0e-3, maximum=10e-3)
+            self.zeta = w.slider_int(text="zeta", old_value=self.zeta, minimum=3, maximum=10)
+            self.nu = w.slider_float(text="nu", old_value=self.nu, minimum=0.1, maximum=0.4)
+            self.E = w.slider_float(text="E", old_value=self.E, minimum=4.8e4, maximum=2.8e5)
             self.lambda_0 = self.E * self.nu / ((1 + self.nu) * (1 - 2 * self.nu))
             self.mu_0 = self.E / (2 * (1 + self.nu))
             # Configurations
