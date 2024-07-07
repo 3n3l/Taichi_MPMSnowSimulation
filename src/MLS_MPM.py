@@ -221,16 +221,12 @@ class Simulation:
                 self.reset_particles()
                 self.is_paused = True
             # Write to disk
-            if self.should_write_to_disk:
-                if w.button(" Stop recording  "):
-                    self.should_write_to_disk = False
-            else:
-                if w.button(" Start recording "):
-                    self.should_write_to_disk = True
+            if w.button(" Stop recording  " if self.should_write_to_disk else " Start recording "):
+                self.should_write_to_disk = not self.should_write_to_disk
             # Reset
             if w.button(" Reset Particles "):
                 self.reset_particles()
-            # Pause/Unpause
+            # Unpause
             if w.button(" Start Simulation"):
                 self.is_paused = False
 
