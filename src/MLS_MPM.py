@@ -134,14 +134,14 @@ class Simulation:
                 n_velocity += weight * g_v
                 n_C += 4 * self.inv_dx * weight * g_v.outer_product(dpos)
             # Boundary conditions for the particle velocities
-            n_position = (self.position[p] + (self.dt * n_velocity)) * self.n_grid
-            collision_left = n_position[0] < 3
-            collision_right = n_position[0] > self.n_grid - 3
+            p_grid = (self.position[p] + (self.dt * n_velocity)) * self.n_grid
+            collision_left = p_grid[0] < 3
+            collision_right = p_grid[0] > (self.n_grid - 3)
             if collision_left or collision_right:
                 n_velocity[0] *= 1 / stickiness
                 n_velocity[1] *= 1 / friction
-            collision_bottom = n_position[1] < 3
-            collision_top = n_position[1] > self.n_grid - 3
+            collision_bottom = p_grid[1] < 3
+            collision_top = p_grid[1] > (self.n_grid - 3)
             if collision_top or collision_bottom:
                 n_velocity[0] *= 1 / friction
                 n_velocity[1] *= 1 / stickiness
