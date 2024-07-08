@@ -188,6 +188,19 @@ def main():
             color=map_to_snowballs([[1, 0.5, 0.5], [0.5, 0.5, 1], [0.5, 0.5, 1]], n_particles=n_particles),
             velocity=map_to_snowballs([[10, 0], [-1, 0], [-1, 0]], n_particles=n_particles),
         ),
+        Configuration(
+            name="Tiny snowballs hit giant snowball (colored)",
+            E=1.4e5,  # Young's modulus (1.4e5)
+            nu=0.2,  # Poisson's ratio (0.2)
+            zeta=5,  # Hardening coefficient (10)
+            theta_c=2.5e-2,  # Critical compression (2.5e-2)
+            theta_s=4.0e-3,  # Critical stretch (7.5e-3)
+            stickiness=2,  # Higher value means a stickier border
+            friction=2,  # Higher value means the border has more friction
+            position=create_snowballs([[0.05, 0.4], [0.05, 0.5], [0.05, 0.6], [0.5, 0.5]], [0.01, 0.01, 0.01, 0.15], n_particles),
+            color=map_to_snowballs([[1, 0.5, 0.5], [1, 0.5, 0.5], [1, 0.5, 0.5], [0.5, 0.5, 1]], n_particles=n_particles),
+            velocity=map_to_snowballs([[8, 0], [12, 0], [8, 0], [-1, 0]], n_particles=n_particles),
+        ),
     ]
 
     print("-" * 150)
