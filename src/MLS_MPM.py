@@ -39,16 +39,16 @@ class Simulation:
             os.makedirs(f".output/{self.directory}")
 
         # Fields
-        self.grid_velo = ti.Vector.field(2, dtype=float, shape=(self.n_grid, self.n_grid))
-        self.grid_mass = ti.field(dtype=float, shape=(self.n_grid, self.n_grid))
+        self.g_velo = ti.Vector.field(2, dtype=float, shape=(self.n_grid, self.n_grid))
+        self.g_mass = ti.field(dtype=float, shape=(self.n_grid, self.n_grid))
         self.initial_position = ti.Vector.field(2, dtype=float, shape=self.n_particles)
         self.initial_velocity = ti.Vector.field(2, dtype=float, shape=self.n_particles)
-        self.position = ti.Vector.field(2, dtype=float, shape=self.n_particles)
-        self.velocity = ti.Vector.field(2, dtype=float, shape=self.n_particles)
+        self.p_position = ti.Vector.field(2, dtype=float, shape=self.n_particles)
+        self.p_velocity = ti.Vector.field(2, dtype=float, shape=self.n_particles)
         self.color = ti.Vector.field(3, dtype=float, shape=self.n_particles)
         self.C = ti.Matrix.field(2, 2, dtype=float, shape=self.n_particles)  # affine velocity field
         self.F = ti.Matrix.field(2, 2, dtype=float, shape=self.n_particles)  # deformation gradient
-        self.Jp = ti.field(dtype=float, shape=self.n_particles)  # plastic deformation
+        self.JP = ti.field(dtype=float, shape=self.n_particles)  # plastic deformation
         self.gravity = ti.Vector.field(2, dtype=float, shape=())
 
         # Load the initial configuration
@@ -59,22 +59,21 @@ class Simulation:
 
     @ti.kernel
     def reset_grids(self):
-        for i, j in self.grid_mass:
-            self.grid_velo[i, j] = [0, 0]
-            self.grid_mass[i, j] = 0
+        for i, j in self.g_mass:
+            self.g_velo[i, j] = [0, 0]
+            self.g_mass[i, j] = 0
 
     @ti.kernel
     def particle_to_grid(self, lambda_0: float, mu_0: float, zeta: float, theta_c: float, theta_s: float):
-        for p in self.position:
-            base = (self.position[p] * self.inv_dx - 0.5).cast(int)
-            fx = self.position[p] * self.inv_dx - base.cast(float)
+        for p in self.p_position:
+            base = (self.p_position[p] * self.inv_dx - 0.5).cast(int)
+            fx = self.p_position[p] * self.inv_dx - base.cast(float)
             # Quadratic kernels  [http://mpm.graphics   Eqn. 123, with x=fx, fx-1,fx-2]
             w = [0.5 * (1.5 - fx) ** 2, 0.75 - (fx - 1) ** 2, 0.5 * (fx - 0.5) ** 2]
             # Deformation gradient update
             self.F[p] = (ti.Matrix.identity(float, 2) + self.dt * self.C[p]) @ self.F[p]
-            # Hardening coefficient: snow gets harder when compressed,
-            # clamp this to stop the rebound from compressed snow
-            h = ti.max(0.1, ti.min(5, ti.exp(zeta * (1.0 - self.Jp[p]))))
+            # Apply snow hardening by adjusting Lame parameters
+            h = ti.max(0.1, ti.min(5, ti.exp(zeta * (1.0 - self.JP[p]))))
             mu, la = mu_0 * h, lambda_0 * h
             U, sigma, V = ti.svd(self.F[p])
             J = 1.0
@@ -82,81 +81,65 @@ class Simulation:
                 singular_value = float(sigma[d, d])
                 singular_value = max(singular_value, 1 - theta_c)
                 singular_value = min(singular_value, 1 + theta_s)  # Plasticity
-                self.Jp[p] *= sigma[d, d] / singular_value
+                self.JP[p] *= sigma[d, d] / singular_value
                 sigma[d, d] = singular_value
                 J *= singular_value
             # Reconstruct elastic deformation gradient after plasticity
             self.F[p] = U @ sigma @ V.transpose()
-            stress = 2 * mu * (self.F[p] - U @ V.transpose()) @ self.F[p].transpose()
-            stress = stress + ti.Matrix.identity(float, 2) * la * J * (J - 1)
-            stress = stress * (-self.dt * self.p_vol * 4 * self.inv_dx * self.inv_dx)
-            affine = stress + self.p_mass * self.C[p]
+            piola_kirchoff = 2 * mu * (self.F[p] - U @ V.transpose()) @ self.F[p].transpose()
+            piola_kirchoff = piola_kirchoff + ti.Matrix.identity(float, 2) * la * J * (J - 1)
+            piola_kirchoff = piola_kirchoff * (-self.dt * self.p_vol * 4 * self.inv_dx * self.inv_dx)
+            affine = piola_kirchoff + self.p_mass * self.C[p]
             for i, j in ti.static(ti.ndrange(3, 3)):
                 # Loop over 3x3 grid node neighborhood
                 offset = ti.Vector([i, j])
                 dpos = (offset.cast(float) - fx) * self.dx
                 weight = w[i][0] * w[j][1]
-                v = self.p_mass * self.velocity[p] + affine @ dpos
-                self.grid_velo[base + offset] += weight * v
-                self.grid_mass[base + offset] += weight * self.p_mass
+                v = self.p_mass * self.p_velocity[p] + affine @ dpos
+                self.g_velo[base + offset] += weight * v
+                self.g_mass[base + offset] += weight * self.p_mass
 
     @ti.kernel
     def momentum_to_velocity(self, friction: float):
-        for i, j in self.grid_mass:
-            if self.grid_mass[i, j] > 0:  # No need for epsilon here
-                self.grid_velo[i, j] = (1 / self.grid_mass[i, j]) * self.grid_velo[i, j]
-                self.grid_velo[i, j] += self.dt * self.gravity[None]  # gravity
+        for i, j in self.g_mass:
+            if self.g_mass[i, j] > 0:  # No need for epsilon here
+                self.g_velo[i, j] = (1 / self.g_mass[i, j]) * self.g_velo[i, j]
+                self.g_velo[i, j] += self.dt * self.gravity[None]  # gravity
                 # Boundary conditions for the grid velocities
-                collision_left = i < 3 and self.grid_velo[i, j][0] < 0
-                collision_right = i > (self.n_grid - 3) and self.grid_velo[i, j][0] > 0
-                if collision_left or collision_right:
-                    self.grid_velo[i, j][0] = 0
-                    self.grid_velo[i, j][1] *= 1 / friction
-                collision_top = j < 3 and self.grid_velo[i, j][1] < 0
-                collision_bottom = j > (self.n_grid - 3) and self.grid_velo[i, j][1] > 0
-                if collision_top or collision_bottom:
-                    self.grid_velo[i, j][0] *= 1 / friction
-                    self.grid_velo[i, j][1] = 0
+                if i < 3 or i > (self.n_grid - 3):  # Vertical collision
+                    self.g_velo[i, j][0] = 0
+                    self.g_velo[i, j][1] *= 1 / friction
+                if j < 3 or j > (self.n_grid - 3):  # Horizontal collision
+                    self.g_velo[i, j][0] *= 1 / friction
+                    self.g_velo[i, j][1] = 0
 
     @ti.kernel
-    def grid_to_particle(self, stickiness: float, friction: float):
-        for p in self.position:
-            base = (self.position[p] * self.inv_dx - 0.5).cast(int)
-            fx = self.position[p] * self.inv_dx - base.cast(float)
+    def grid_to_particle(self):
+        for p in self.p_position:
+            base = (self.p_position[p] * self.inv_dx - 0.5).cast(int)
+            fx = self.p_position[p] * self.inv_dx - base.cast(float)
             w = [0.5 * (1.5 - fx) ** 2, 0.75 - (fx - 1.0) ** 2, 0.5 * (fx - 0.5) ** 2]
             n_velocity = ti.Vector.zero(float, 2)
             n_C = ti.Matrix.zero(float, 2, 2)
             for i, j in ti.static(ti.ndrange(3, 3)):
                 # Loop over 3x3 grid node neighborhood
                 dpos = ti.Vector([i, j]).cast(float) - fx
-                g_v = self.grid_velo[base + ti.Vector([i, j])]
+                g_v = self.g_velo[base + ti.Vector([i, j])]
                 weight = w[i][0] * w[j][1]
                 n_velocity += weight * g_v
                 n_C += 4 * self.inv_dx * weight * g_v.outer_product(dpos)
-            # Boundary conditions for the particle velocities
-            p_grid = (self.position[p] + (self.dt * n_velocity)) * self.n_grid
-            collision_left = p_grid[0] < 3
-            collision_right = p_grid[0] > (self.n_grid - 3)
-            if collision_left or collision_right:
-                n_velocity[0] *= 1 / stickiness
-                n_velocity[1] *= 1 / friction
-            collision_bottom = p_grid[1] < 3
-            collision_top = p_grid[1] > (self.n_grid - 3)
-            if collision_top or collision_bottom:
-                n_velocity[0] *= 1 / friction
-                n_velocity[1] *= 1 / stickiness
-            self.velocity[p], self.C[p] = n_velocity, n_C
-            self.position[p] += self.dt * n_velocity  # advection
+            self.p_velocity[p], self.C[p] = n_velocity, n_C
+            self.p_position[p] += self.dt * n_velocity  # advection
 
     @ti.kernel
     def reset_particles(self):
         self.gravity[None] = [0, -9.8]
         for i in range(self.n_particles):
-            self.position[i] = self.initial_position[i]
-            self.velocity[i] = self.initial_velocity[i]
+            self.p_position[i] = self.initial_position[i]
+            self.p_velocity[i] = self.initial_velocity[i]
             self.F[i] = ti.Matrix([[1, 0], [0, 1]])
             self.C[i] = ti.Matrix.zero(float, 2, 2)
-            self.Jp[i] = 1
+            self.JP[i] = 1
 
     def load_configuration(self):
         self.initial_position.from_numpy(self.configuration.position)
@@ -190,7 +173,7 @@ class Simulation:
                 self.reset_grids()
                 self.particle_to_grid(self.lambda_0, self.mu_0, self.zeta, self.theta_c, self.theta_s)
                 self.momentum_to_velocity(self.friction)
-                self.grid_to_particle(stickiness=self.stickiness, friction=self.friction)
+                self.grid_to_particle()
 
     def show_settings(self):
         if not self.is_paused:
@@ -232,7 +215,7 @@ class Simulation:
 
     def render(self):
         self.canvas.set_background_color((0.054, 0.06, 0.09))
-        self.canvas.circles(centers=self.position, radius=0.0015, per_vertex_color=self.color)
+        self.canvas.circles(centers=self.p_position, radius=0.0015, per_vertex_color=self.color)
         if self.should_write_to_disk and not self.is_paused and not self.is_showing_settings:
             self.window.save_image(f".output/{self.directory}/{self.frame:06d}.png")
             self.frame += 1
