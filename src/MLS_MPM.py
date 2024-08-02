@@ -45,16 +45,25 @@ class Simulation:
         self.initial_velocity = ti.Vector.field(2, dtype=float, shape=self.n_particles)
         self.p_position = ti.Vector.field(2, dtype=float, shape=self.n_particles)
         self.p_velocity = ti.Vector.field(2, dtype=float, shape=self.n_particles)
-        self.color = ti.Vector.field(3, dtype=float, shape=self.n_particles)
+        self.p_color = ti.Vector.field(3, dtype=float, shape=self.n_particles)
         self.C = ti.Matrix.field(2, 2, dtype=float, shape=self.n_particles)  # affine velocity field
         self.F = ti.Matrix.field(2, 2, dtype=float, shape=self.n_particles)  # deformation gradient
         self.JP = ti.field(dtype=float, shape=self.n_particles)  # plastic deformation
         self.gravity = ti.Vector.field(2, dtype=float, shape=())
+        self.stickiness = ti.field(dtype=float, shape=())
+        self.friction = ti.field(dtype=float, shape=())
+        self.theta_c = ti.field(dtype=float, shape=())
+        self.theta_s = ti.field(dtype=float, shape=())
+        self.zeta = ti.field(dtype=int, shape=())
+        self.nu = ti.field(dtype=float, shape=())
+        self.E = ti.field(dtype=float, shape=())
+        self.lambda_0 = ti.field(dtype=float, shape=())
+        self.mu_0 = ti.field(dtype=float, shape=())
 
         # Load the initial configuration
         self.configuration_id = 0
         self.configurations = configurations
-        self.configuration = configurations[self.configuration_id]
+        self.model = configurations[self.configuration_id]
         self.load_configuration()
 
     @ti.kernel
@@ -64,7 +73,7 @@ class Simulation:
             self.g_mass[i, j] = 0
 
     @ti.kernel
-    def particle_to_grid(self, lambda_0: float, mu_0: float, zeta: float, theta_c: float, theta_s: float):
+    def particle_to_grid(self):
         for p in self.p_position:
             base = (self.p_position[p] * self.inv_dx - 0.5).cast(int)
             fx = self.p_position[p] * self.inv_dx - base.cast(float)
@@ -73,14 +82,14 @@ class Simulation:
             # Deformation gradient update
             self.F[p] = (ti.Matrix.identity(float, 2) + self.dt * self.C[p]) @ self.F[p]
             # Apply snow hardening by adjusting Lame parameters
-            h = ti.max(0.1, ti.min(5, ti.exp(zeta * (1.0 - self.JP[p]))))
-            mu, la = mu_0 * h, lambda_0 * h
+            h = ti.max(0.1, ti.min(5, ti.exp(self.zeta[None] * (1.0 - self.JP[p]))))
+            mu, la = self.mu_0[None] * h, self.lambda_0[None] * h
             U, sigma, V = ti.svd(self.F[p])
             J = 1.0
             for d in ti.static(range(2)):
                 singular_value = float(sigma[d, d])
-                singular_value = max(singular_value, 1 - theta_c)
-                singular_value = min(singular_value, 1 + theta_s)
+                singular_value = max(singular_value, 1 - self.theta_c[None])
+                singular_value = min(singular_value, 1 + self.theta_s[None])
                 self.JP[p] *= sigma[d, d] / singular_value
                 sigma[d, d] = singular_value
                 J *= singular_value
@@ -99,7 +108,7 @@ class Simulation:
                 self.g_mass[base + offset] += weight * self.p_mass
 
     @ti.kernel
-    def momentum_to_velocity(self, friction: float):
+    def momentum_to_velocity(self):
         for i, j in self.g_mass:
             if self.g_mass[i, j] > 0:  # No need for epsilon here
                 self.g_velo[i, j] = (1 / self.g_mass[i, j]) * self.g_velo[i, j]
@@ -107,9 +116,9 @@ class Simulation:
                 # Boundary conditions for the grid velocities, this implements sticky collisions
                 if i < 3 or i > (self.n_grid - 3):  # Vertical collision
                     self.g_velo[i, j][0] = 0
-                    self.g_velo[i, j][1] *= 1 / friction
+                    self.g_velo[i, j][1] *= 1 / self.friction[None]
                 if j < 3 or j > (self.n_grid - 3):  # Horizontal collision
-                    self.g_velo[i, j][0] *= 1 / friction
+                    self.g_velo[i, j][0] *= 1 / self.friction[None]
                     self.g_velo[i, j][1] = 0
 
     @ti.kernel
@@ -135,6 +144,7 @@ class Simulation:
         for i in range(self.n_particles):
             self.p_position[i] = self.initial_position[i]
             self.p_velocity[i] = self.initial_velocity[i]
+            # self.p_color[i] = self.initial_velocity[i]
             self.F[i] = ti.Matrix([[1, 0], [0, 1]])
             self.C[i] = ti.Matrix.zero(float, 2, 2)
             self.JP[i] = 1
@@ -146,19 +156,18 @@ class Simulation:
         self.reset_particles()
 
     def load_configuration(self):
-        self.initial_position.from_numpy(self.configuration.position)
-        self.initial_velocity.from_numpy(self.configuration.velocity)
-        self.color.from_numpy(self.configuration.color)
-        # Save configuration variables, so these won't be overriden
-        self.stickiness = self.configuration.stickiness
-        self.friction = self.configuration.friction
-        self.lambda_0 = self.configuration.lambda_0
-        self.theta_c = self.configuration.theta_c
-        self.theta_s = self.configuration.theta_s
-        self.zeta = self.configuration.zeta
-        self.mu_0 = self.configuration.mu_0
-        self.nu = self.configuration.nu
-        self.E = self.configuration.E
+        self.initial_position.from_numpy(self.model.position)
+        self.initial_velocity.from_numpy(self.model.velocity)
+        self.p_color.from_numpy(self.model.color)
+        self.stickiness[None] = self.model.stickiness
+        self.friction[None] = self.model.friction
+        self.lambda_0[None] = self.model.lambda_0
+        self.theta_c[None] = self.model.theta_c
+        self.theta_s[None] = self.model.theta_s
+        self.zeta[None] = self.model.zeta
+        self.mu_0[None] = self.model.mu_0
+        self.nu[None] = self.model.nu
+        self.E[None] = self.model.E
 
     def handle_events(self):
         if self.window.get_event(ti.ui.PRESS):
@@ -175,8 +184,8 @@ class Simulation:
         if not self.is_paused:
             for _ in range(int(2e-3 // self.dt)):
                 self.reset_grids()
-                self.particle_to_grid(self.lambda_0, self.mu_0, self.zeta, self.theta_c, self.theta_s)
-                self.momentum_to_velocity(self.friction)
+                self.particle_to_grid()
+                self.momentum_to_velocity()
                 self.grid_to_particle()
 
     def show_configurations(self, subwindow):
@@ -187,21 +196,21 @@ class Simulation:
                 self.configuration_id = i
         if self.configuration_id != prev_configuration_id:
             _id = self.configuration_id
-            self.configuration = self.configurations[_id]
+            self.model = self.configurations[_id]
             self.load_configuration()
             self.reset_particles()
             self.is_paused = True
 
     def show_parameters(self, subwindow):
-        self.stickiness = subwindow.slider_float(text="stickiness", old_value=self.stickiness, minimum=1.0, maximum=5.0)
-        self.friction = subwindow.slider_float(text="friction", old_value=self.friction, minimum=1.0, maximum=5.0)
-        self.theta_c = subwindow.slider_float(text="theta_c", old_value=self.theta_c, minimum=1e-2, maximum=3.5e-2)
-        self.theta_s = subwindow.slider_float(text="theta_s", old_value=self.theta_s, minimum=5.0e-3, maximum=10e-3)
-        self.zeta = subwindow.slider_int(text="zeta", old_value=self.zeta, minimum=3, maximum=10)
-        self.nu = subwindow.slider_float(text="nu", old_value=self.nu, minimum=0.1, maximum=0.4)
-        self.E = subwindow.slider_float(text="E", old_value=self.E, minimum=4.8e4, maximum=2.8e5)
-        self.lambda_0 = self.E * self.nu / ((1 + self.nu) * (1 - 2 * self.nu))
-        self.mu_0 = self.E / (2 * (1 + self.nu))
+        self.stickiness[None] = subwindow.slider_float("stickiness", self.stickiness[None], 1.0, 5.0)
+        self.friction[None] = subwindow.slider_float("friction", self.friction[None], 1.0, 5.0)
+        self.theta_c[None] = subwindow.slider_float("theta_c", self.theta_c[None], 1e-2, 3.5e-2)
+        self.theta_s[None] = subwindow.slider_float("theta_s", self.theta_s[None], 5.0e-3, 10e-3)
+        self.zeta[None] = subwindow.slider_int("zeta", self.zeta[None], 3, 10)
+        self.nu[None] = subwindow.slider_float("nu", self.nu[None], 0.1, 0.4)
+        self.E[None] = subwindow.slider_float("E", self.E[None], 4.8e4, 2.8e5)
+        self.lambda_0[None] = self.E[None] * self.nu[None] / ((1 + self.nu[None]) * (1 - 2 * self.nu[None]))
+        self.mu_0[None] = self.E[None] / (2 * (1 + self.nu[None]))
 
     def show_buttons(self, subwindow):
         if subwindow.button(" Stop recording  " if self.should_write_to_disk else " Start recording "):
@@ -223,7 +232,7 @@ class Simulation:
 
     def render(self):
         self.canvas.set_background_color((0.054, 0.06, 0.09))
-        self.canvas.circles(centers=self.p_position, radius=0.0015, per_vertex_color=self.color)
+        self.canvas.circles(centers=self.p_position, radius=0.0015, per_vertex_color=self.p_color)
         if self.should_write_to_disk and not self.is_paused and not self.is_showing_settings:
             self.window.save_image(f".output/{self.directory}/{self.frame:06d}.png")
             self.frame += 1

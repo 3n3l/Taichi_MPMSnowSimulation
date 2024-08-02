@@ -2,7 +2,7 @@ import taichi as ti
 import numpy as np
 
 
-@ti.data_oriented
+# @ti.data_oriented
 class Configuration:
     """This class represents a starting configuration for the MLS-MPM algorithm."""
 
