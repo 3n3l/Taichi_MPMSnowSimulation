@@ -141,6 +141,11 @@ class Simulation:
             self.C[i] = ti.Matrix.zero(float, 2, 2)
             self.JP[i] = 1
 
+    def reset(self):
+        self.frame = 0
+        self.directory = datetime.now().strftime("%d%m%Y_%H%M")
+        os.makedirs(f".output/{self.directory}")
+        self.reset_particles()
     def load_configuration(self):
         self.initial_position.from_numpy(self.configuration.position)
         self.initial_velocity.from_numpy(self.configuration.velocity)
