@@ -1,11 +1,21 @@
 from datetime import datetime
-from numpy import dtype, shape
 import taichi.math as tm
 import taichi as ti
 import os
 
 ICE_COLOR = [0.8, 0.8, 1]
 WATER_COLOR = [0.4, 0.4, 1]
+WATER_CONDUCTIVITY = 0.55  # Water: 0.55, Ice: 2.33
+ICE_CONDUCTIVITY = 2.33
+WATER_HEAT_CAPACITY = 4.186  # Water: 4.186, Ice: 2.093 (j/dC)
+ICE_HEAT_CAPACITY = 2.093
+LATEN_HEAT = 0.334  # in J/kg
+
+
+class Classification:
+    Empty = 0
+    Colliding = 1
+    Interior = 2
 
 
 class Phase:
@@ -37,28 +47,41 @@ class ThermodynamicModel:
         self.p_mass = self.p_vol * self.rho_0
 
         ### New parameters ====================================================
-        # self.should_show_grid = True
-        # self.should_show_cells = False
-
-        # self.nx = 719 # Grid width
-        # self.dy = self.dx
-        # self.g_position = ti.Vector.field(2, dtype=float, shape=(self.n_grid**2))
-
         # Number of dimensions
         self.d = 2
 
-        # MAC cells
-        self.x_faces = ti.field(dtype=float, shape=(self.n_grid + 1, self.n_grid))
-        self.y_faces = ti.field(dtype=float, shape=(self.n_grid, self.n_grid + 1))
-        self.pressure = ti.field(dtype=float, shape=(self.n_grid, self.n_grid))
+        # Parameters to control melting/freezing
+        # TODO: these are variables and need to be put into fields
+        # TODO: these depend not only on phase, but also on temperature,
+        #       so ideally they are functions of these two variables
+        # self.heat_conductivity = 0.55 # Water: 0.55, Ice: 2.33
+        # self.heat_capacity = 4.186 # Water: 4.186, Ice: 2.093 (j/dC)
+        # self.latent_heat = 0.334 # in J/kg
 
-        # Track the phase, this will either be Phase.Ice or Phase.Water
+        # MAC cells, we have d (NOTE: only 2 atm) face-centered grids and the pressure (cell centered grid)
+        self.face_mass_x = ti.field(dtype=float, shape=(self.n_grid + 1, self.n_grid))
+        self.face_mass_y = ti.field(dtype=float, shape=(self.n_grid, self.n_grid + 1))
+        self.face_velocity_x = ti.field(dtype=float, shape=(self.n_grid + 1, self.n_grid))
+        self.face_velocity_y = ti.field(dtype=float, shape=(self.n_grid, self.n_grid + 1))
+        self.face_conductivity_x = ti.field(dtype=float, shape=(self.n_grid + 1, self.n_grid))
+        self.face_conductivity_y = ti.field(dtype=float, shape=(self.n_grid, self.n_grid + 1))
+
+        self.cell_mass = ti.field(dtype=float, shape=(self.n_grid + 1, self.n_grid))
+        self.cell_pressure = ti.field(dtype=float, shape=(self.n_grid, self.n_grid))
+        self.cell_capacity = ti.field(dtype=float, shape=self.n_particles)
+        self.cell_temperature = ti.field(dtype=float, shape=self.n_particles)
+        self.cell_classification = ti.field(dtype=float, shape=(self.n_grid, self.n_grid))
+
+        # Track properties per particle
         self.p_phase = ti.field(dtype=float, shape=self.n_particles)
+        self.p_capacity = ti.field(dtype=float, shape=self.n_particles)
+        self.p_temperature = ti.field(dtype=float, shape=self.n_particles)
+        self.p_conductivity = ti.field(dtype=float, shape=self.n_particles)
 
         # Track elastic and plastic parts of the deformation gradient
         # NOTE: This might not be needed, as all of the computations might be done in p2g
-        self.FE = ti.Matrix.field(2, 2, dtype=float, shape=self.n_particles)
-        self.FP = ti.Matrix.field(2, 2, dtype=float, shape=self.n_particles)
+        # self.FE = ti.Matrix.field(2, 2, dtype=float, shape=self.n_particles)
+        # self.FP = ti.Matrix.field(2, 2, dtype=float, shape=self.n_particles)
         ### ===================================================================
 
         # Parameters to control the simulation
@@ -79,8 +102,8 @@ class ThermodynamicModel:
             os.makedirs(f".output/{self.directory}")
 
         # Create fields
-        self.g_velo = ti.Vector.field(2, dtype=float, shape=(self.n_grid, self.n_grid))
-        self.g_mass = ti.field(dtype=float, shape=(self.n_grid, self.n_grid))
+        # self.g_velo = ti.Vector.field(2, dtype=float, shape=(self.n_grid, self.n_grid))
+        # self.g_mass = ti.field(dtype=float, shape=(self.n_grid, self.n_grid))
         self.p_position = ti.Vector.field(2, dtype=float, shape=self.n_particles)
         self.p_velocity = ti.Vector.field(2, dtype=float, shape=self.n_particles)
         self.p_color = ti.Vector.field(3, dtype=float, shape=self.n_particles)
@@ -110,21 +133,13 @@ class ThermodynamicModel:
 
     @ti.kernel
     def reset_grids(self):
-        for i, j in self.g_mass:
-            self.g_velo[i, j] = [0, 0]
-            self.g_mass[i, j] = 0
+        for i, j in self.cell_mass:
+            # self.g_velo[i, j] = [0, 0]
+            self.cell_mass[i, j] = 0
 
     @ti.kernel
     def particle_to_grid(self):
         for p in self.p_position:
-            base = (self.p_position[p] * self.inv_dx - 0.5).cast(int)
-            fx = self.p_position[p] * self.inv_dx - base.cast(float)
-            # Quadratic kernels  [http://mpm.graphics   Eqn. 123, with x=fx, fx-1,fx-2]
-            w = [
-                0.5 * (1.5 - fx) ** 2,
-                0.75 - (fx - 1) ** 2,
-                0.5 * (fx - 0.5) ** 2,
-            ]
             # Deformation gradient update
             self.F[p] = (ti.Matrix.identity(float, 2) + self.dt * self.C[p]) @ self.F[p]
             # Apply snow hardening by adjusting Lame parameters
@@ -134,41 +149,84 @@ class ThermodynamicModel:
                 mu = 0
             U, sigma, V = ti.svd(self.F[p])
             J = 1.0
-            for d in ti.static(range(2)):
-                # Clamp singular values to [1 - theta_c, 1 + theta_s]
+            for d in ti.static(range(self.d)):  # Clamp singular values to [1 - theta_c, 1 + theta_s]
                 singular_value = float(sigma[d, d])
                 singular_value = max(singular_value, 1 - self.theta_c[None])
                 singular_value = min(singular_value, 1 + self.theta_s[None])
                 self.JP[p] *= sigma[d, d] / singular_value
                 sigma[d, d] = singular_value
                 J *= singular_value
+
             ### New ============================================================
             FE = U @ sigma @ V.transpose()
-            FP = tm.inverse(self.F[p]) @ FE
-
             if self.p_phase[p] == Phase.Water:  # Apply correction for dilational/deviatoric stresses
+                FP = tm.inverse(self.F[p]) @ FE
                 FE *= J ** (1 / self.d)
                 FP *= J ** -(1 / self.d)
                 self.F[p] = FE @ FP
             elif self.p_phase[p] == Phase.Ice:  # Reconstruct elastic deformation gradient after plasticity
-                self.F[p] = U @ sigma @ V.transpose()
+                self.F[p] = FE
             ### ================================================================
+            # TODO: stress needs only to be computed in the ice phase?
             stress = 2 * mu * (self.F[p] - U @ V.transpose()) @ self.F[p].transpose()
             stress += ti.Matrix.identity(float, 2) * la * J * (J - 1)
             stress *= -self.dt * self.p_vol * 4 * self.inv_dx * self.inv_dx
             affine = stress + self.p_mass * self.C[p]
+            base = (self.p_position[p] * self.inv_dx - 0.5).cast(int)
+            fx = self.p_position[p] * self.inv_dx - base.cast(float)
+            # Quadratic kernels  [http://mpm.graphics   Eqn. 123, with x=fx, fx-1,fx-2]
+            w = [0.5 * (1.5 - fx) ** 2, 0.75 - (fx - 1) ** 2, 0.5 * (fx - 0.5) ** 2]
             for i, j in ti.static(ti.ndrange(3, 3)):  # Loop over 3x3 grid node neighborhood
-                offset = ti.Vector([i, j])
-                dpos = (offset.cast(float) - fx) * self.dx
                 weight = w[i][0] * w[j][1]
-                v = self.p_mass * self.p_velocity[p] + affine @ dpos
-                self.g_velo[base + offset] += weight * v
-                self.g_mass[base + offset] += weight * self.p_mass
+                c_offset = ti.Vector([i, j])
+                dpos = (c_offset.cast(float) - fx) * self.dx
+                m = weight * self.p_mass
+                v = weight * self.p_mass * self.p_velocity[p] + affine @ dpos
+                k = weight * self.p_mass * self.p_conductivity[p]  # TODO: conductivity should be computed here
+
+                # TODO: does the base also need adjustment for the faces?
+
+                # Rasterize to grid faces, base + c_offset yields the coordinates of the cell centers,
+                # we can extract the coordinates of the corresponding x-faces [i, j], [i + 1, j],
+                # and y-faces with [i, j], [i + 1, j].
+                x_offset = ti.Vector([i + 1, j])
+                y_offset = ti.Vector([i, j + 1])
+                self.face_mass_x[base + c_offset] += m
+                self.face_mass_x[base + x_offset] += m
+                self.face_mass_y[base + c_offset] += m
+                self.face_mass_y[base + y_offset] += m
+                self.face_velocity_x[base + c_offset] += v
+                self.face_velocity_x[base + x_offset] += v
+                self.face_velocity_y[base + c_offset] += v
+                self.face_velocity_y[base + y_offset] += v
+                self.face_conductivity_x[base + c_offset] += k
+                self.face_conductivity_x[base + x_offset] += k
+                self.face_conductivity_y[base + c_offset] += k
+                self.face_conductivity_y[base + y_offset] += k
+
+                # Rasterize to cell centers
+                self.cell_mass[base + c_offset] += m
+                self.cell_capacity[base + c_offset] += weight * self.p_capacity[p]
+                self.cell_temperature[base + c_offset] += weight * self.p_temperature[p]
+                # TODO: compute lambda per particle here?
 
     @ti.kernel
     def momentum_to_velocity(self):
-        for i, j in self.g_mass:
-            if self.g_mass[i, j] > 0:  # No need for epsilon here
+        for i, j in self.cell_mass:
+            # A MAC face is colliding if the level set computed by any collision object is negative at the face center.
+
+            # A cell is marked as colliding if all of its surrounding faces are colliding.
+            # Otherwise, a cell is interior if the cell and all of its surrounding faces have mass.
+            # All remaining cells are empty.
+            if 1 == 2:
+                self.cell_classification[i, j] = Classification.Colliding
+            elif 1 == 3:
+                self.cell_classification[i, j] = Classification.Interior
+            else:
+                self.cell_classification[i, j] = Classification.Empty
+
+            # TODO: how to do this with the cells (or only on faces?)
+            if self.cell_mass[i, j] > 0:  # No need for epsilon here
                 self.g_velo[i, j] = (1 / self.g_mass[i, j]) * self.g_velo[i, j]
                 self.g_velo[i, j] += self.dt * self.gravity[None]  # gravity
                 vertical_collision = i < 3 and self.g_velo[i, j][0] < 0
@@ -201,17 +259,25 @@ class ThermodynamicModel:
 
     @ti.kernel
     def reset(self):
+        ### New ================================================================
+        # TODO: some of this might not be needed
+        for i, j in self.face_mass_x:
+            self.face_mass_x[i, j] = 0
+        for i, j in self.face_mass_y:
+            self.face_mass_y[i, j] = 0
+        for i, j in self.cell_mass:
+            self.cell_classification[i, j] = Classification.Empty
+            self.cell_pressure[i, j] = 0
+        ### ====================================================================
         for i in range(self.n_particles):
             self.p_position[i] = [(ti.random() * 0.1) + 0.45, (ti.random() * 0.1) + 0.001]
             # material[i] = i // group_size  # 0: fluid 1: jelly 2: snow
             self.F[i] = ti.Matrix([[1, 0], [0, 1]])
             self.C[i] = ti.Matrix.zero(float, 2, 2)
-            ### New parameters =================================================
+            ### New ============================================================
             self.p_phase[i] = Phase.Water
-            self.FE[i] = ti.Matrix([[1, 0], [0, 1]])
-            self.FP[i] = ti.Matrix([[1, 0], [0, 1]])
-            ### ================================================================
             self.p_color[i] = WATER_COLOR
+            ### ================================================================
             self.p_velocity[i] = [0, 0]
             self.JP[i] = 1
 
