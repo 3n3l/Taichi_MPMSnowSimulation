@@ -27,9 +27,9 @@ class HydrodynamicModel:
         initial_velocity: np.ndarray,
         initial_phase: np.ndarray,
         theta_c=2.5e-2,  # Critical compression (2.5e-2)
-        theta_s=7.5e-3,  # Critical stretch (7.5e-3)
+        theta_s=5.5e-3,  # Critical stretch (7.5e-3)
         zeta=20,  # Hardening coefficient (10)
-        E=2.8e5,  # Young's modulus (1.4e5)
+        E=3.8e5,  # Young's modulus (1.4e5)
         nu=0.33,  # Poisson's ratio (0.2)
     ):
         # MPM Parameters that are configuration independent
@@ -62,6 +62,7 @@ class HydrodynamicModel:
         # Create fields
         self.g_velo = ti.Vector.field(2, dtype=float, shape=(self.n_grid, self.n_grid))
         self.g_mass = ti.field(dtype=float, shape=(self.n_grid, self.n_grid))
+
         self.p_position = ti.Vector.field(2, dtype=float, shape=self.n_particles)
         self.p_velocity = ti.Vector.field(2, dtype=float, shape=self.n_particles)
         self.p_color = ti.Vector.field(3, dtype=float, shape=self.n_particles)
@@ -159,8 +160,10 @@ class HydrodynamicModel:
             if self.g_mass[i, j] > 0:  # No need for epsilon here
                 self.g_velo[i, j] = (1 / self.g_mass[i, j]) * self.g_velo[i, j]
                 self.g_velo[i, j] += self.dt * self.gravity[None]  # gravity
+
                 dist = self.attractor_pos[None] - self.dx * ti.Vector([i, j])
                 self.g_velo[i, j] += dist / (0.01 + dist.norm()) * self.attractor_strength[None] * self.dt * 100
+
                 vertical_collision = i < 3 and self.g_velo[i, j][0] < 0
                 vertical_collision |= i > (self.n_grid - 3) and self.g_velo[i, j][0] > 0
                 horizontal_collision = j < 3 and self.g_velo[i, j][1] < 0
@@ -314,7 +317,7 @@ def main():
         quality=quality,
         n_particles=n_particles,
         initial_position=create_square(
-            positions=[[0.001, 0.001], [0.001, 0.001], [0.001, 0.001], [0.001, 0.001], [0.33, 0.11]],
+            positions=[[0.001, 0.001], [0.001, 0.001], [0.001, 0.001], [0.001, 0.001], [0.33, 0.05]],
             heights=[0.05, 0.05, 0.05, 0.05, 0.01],
             widths=[0.98, 0.98, 0.98, 0.98, 0.33],
         ),
