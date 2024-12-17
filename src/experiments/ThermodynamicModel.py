@@ -1,14 +1,14 @@
 from datetime import datetime
-from taichi.lang import Vector
+from taichi.lang.matrix_ops import Vector, determinant
 import taichi.math as tm
 import taichi as ti
 import os
 
 WATER_CONDUCTIVITY = 0.55  # Water: 0.55, Ice: 2.33
 ICE_CONDUCTIVITY = 2.33
-WATER_HEAT_CAPACITY = 4.186  # Water: 4.186, Ice: 2.093 (j/dC)
-ICE_HEAT_CAPACITY = 2.093
-LATEN_HEAT = 0.334  # in J/kg
+WATER_HEAT_CAPACITY = 4.186  # j/dC
+ICE_HEAT_CAPACITY = 2.093  # j/dC
+LATEN_HEAT = 0.334  # J/kg
 
 
 class Classification:
@@ -63,37 +63,31 @@ class ThermodynamicModel:
         # self.heat_capacity = 4.186 # Water: 4.186, Ice: 2.093 (j/dC)
         # self.latent_heat = 0.334 # in J/kg
 
-        # MAC cells, we have d (NOTE: only 2 atm) face-centered grids and the pressure (cell centered grid)
+        # Properties on MAC-faces.
         self.face_mass_x = ti.field(dtype=ti.float32, shape=(self.n_grid + 1, self.n_grid))
         self.face_mass_y = ti.field(dtype=ti.float32, shape=(self.n_grid, self.n_grid + 1))
-
         self.face_velocity_x = ti.field(dtype=ti.float32, shape=(self.n_grid + 1, self.n_grid))
         self.face_velocity_y = ti.field(dtype=ti.float32, shape=(self.n_grid, self.n_grid + 1))
-
         self.face_conductivity_x = ti.field(dtype=ti.float32, shape=(self.n_grid + 1, self.n_grid))
         self.face_conductivity_y = ti.field(dtype=ti.float32, shape=(self.n_grid, self.n_grid + 1))
 
-        self.face_force_x = ti.field(dtype=ti.float32, shape=(self.n_grid + 1, self.n_grid))
-        self.face_force_y = ti.field(dtype=ti.float32, shape=(self.n_grid, self.n_grid + 1))
-
+        # Properties on MAC-cells.
         self.cell_mass = ti.field(dtype=ti.float32, shape=(self.n_grid, self.n_grid))
-        self.cell_pressure = ti.field(dtype=ti.float32, shape=(self.n_grid, self.n_grid))
+        self.cell_pressure = ti.field(dtype=ti.float32, shape=(self.n_grid + 1, self.n_grid + 1))
         self.cell_capacity = ti.field(dtype=ti.float32, shape=(self.n_grid, self.n_grid))
+        self.cell_inv_lambda = ti.field(dtype=ti.float32, shape=(self.n_grid, self.n_grid))
         self.cell_temperature = ti.field(dtype=ti.float32, shape=(self.n_grid, self.n_grid))
         self.cell_classification = ti.field(dtype=ti.float32, shape=(self.n_grid, self.n_grid))
 
-        # Track properties per particle
+        # Properties on particles.
         self.p_mass = ti.field(dtype=ti.float32, shape=self.n_particles)
         self.p_phase = ti.field(dtype=ti.float32, shape=self.n_particles)
         self.p_capacity = ti.field(dtype=ti.float32, shape=self.n_particles)
+        self.p_inv_lambda = ti.field(dtype=ti.float32, shape=self.n_particles)
         self.p_temperature = ti.field(dtype=ti.float32, shape=self.n_particles)
         self.p_conductivity = ti.field(dtype=ti.float32, shape=self.n_particles)
-
-        # NOTE: this C (velocity derivates) for the faces, see JSS15.
         self.cp_x = ti.Vector.field(2, dtype=ti.float32, shape=self.n_particles)
         self.cp_y = ti.Vector.field(2, dtype=ti.float32, shape=self.n_particles)
-        self.bp_x = ti.Vector.field(2, dtype=ti.float32, shape=self.n_particles)
-        self.bp_y = ti.Vector.field(2, dtype=ti.float32, shape=self.n_particles)
 
         # Track elastic and plastic parts of the deformation gradient
         # NOTE: This might not be needed, as all of the computations might be done in p2g
@@ -124,7 +118,10 @@ class ThermodynamicModel:
         self.p_color = ti.Vector.field(3, dtype=float, shape=self.n_particles)
         self.C = ti.Matrix.field(2, 2, dtype=float, shape=self.n_particles)  # affine velocity field
         self.F = ti.Matrix.field(2, 2, dtype=float, shape=self.n_particles)  # deformation gradient
-        self.JP = ti.field(dtype=float, shape=self.n_particles)  # plastic deformation
+        # TODO: not all of the Js need to be saved
+        self.J = ti.field(dtype=float, shape=self.n_particles)
+        self.JP = ti.field(dtype=float, shape=self.n_particles)
+        self.JE = ti.field(dtype=float, shape=self.n_particles)
         self.gravity = ti.Vector.field(2, dtype=float, shape=())
         self.stickiness = ti.field(dtype=float, shape=())
         self.friction = ti.field(dtype=float, shape=())
@@ -155,6 +152,7 @@ class ThermodynamicModel:
             self.face_velocity_y[i, j] = 0
             self.face_mass_y[i, j] = 0
         for i, j in self.cell_mass:
+            self.cell_classification[i, j] = Classification.Empty
             self.cell_mass[i, j] = 0
 
     @ti.kernel
@@ -173,94 +171,91 @@ class ThermodynamicModel:
                 singular_value = float(sigma[d, d])
                 singular_value = max(singular_value, 1 - self.theta_c[None])
                 singular_value = min(singular_value, 1 + self.theta_s[None])
-                self.JP[p] *= sigma[d, d] / singular_value
+                self.J[p] *= sigma[d, d] / singular_value
                 sigma[d, d] = singular_value
                 J *= singular_value
 
             ### New ============================================================
             FE = U @ sigma @ V.transpose()
+            FP = tm.inverse(self.F[p]) @ FE
             if self.p_phase[p] == Phase.Water:  # Apply correction for dilational/deviatoric stresses
-                FP = tm.inverse(self.F[p]) @ FE
                 FE *= J ** (1 / self.n_dimensions)
                 FP *= J ** -(1 / self.n_dimensions)
                 self.F[p] = FE @ FP
             elif self.p_phase[p] == Phase.Ice:  # Reconstruct elastic deformation gradient after plasticity
                 self.F[p] = FE
+
+            self.JE[p] = determinant(FE)
+            self.JP[p] = determinant(FP)
+
+            # Compute pressure.
+            # self.cell_temperature[c_base + offset] += c_weight * self.p_temperature[p]
+            # pressure = (-1 / self.JP[p]) * self.lambda_0 * (self.JE[p] - 1)
             ### ================================================================
 
             # Compute Piola-Kirchhoff stress.
-            # TODO: Stress is not used right now
-            # TODO: Stress needs to be computed and incorporated somewhere else?
+            # TODO: This might only need the elastic part? Or something else?
             stress = 2 * mu * (self.F[p] - U @ V.transpose()) @ self.F[p].transpose()
             stress += ti.Matrix.identity(float, 2) * la * J * (J - 1)
             stress *= -self.dt * self.p_vol * 4 * self.inv_dx * self.inv_dx
-            affine = stress + self.p_mass[p] * self.C[p]
+            x_affine = (stress + self.p_mass[p] * self.C[p]) @ ti.Vector([1, 0])
+            y_affine = (stress + self.p_mass[p] * self.C[p]) @ ti.Vector([0, 1])
 
             # NOTE: Quadratic kernels (JST16, Eqn. 123, with x=fx, fx-1,fx-2)
             # TODO: this might need cubic weights from the augmented mpm paper
-            c_base = (self.p_position[p] * self.inv_dx - 0.5).cast(int)
-            x_base = (self.p_position[p] * self.inv_dx - ti.Vector([1, 0.5])).cast(int)
-            y_base = (self.p_position[p] * self.inv_dx - ti.Vector([0.5, 1])).cast(int)
+            c_stagger = ti.Vector([0.5, 0.5])  # -(0.0, 0.0) + (0.5, 0.5)
+            x_stagger = ti.Vector([0.5, 1.0])  # -(0.5, 0.0) + (0.5, 0.5)
+            y_stagger = ti.Vector([1.0, 0.5])  # -(0.0, 0.5) + (0.5, 0.5)
+            c_base = (self.p_position[p] * self.inv_dx - c_stagger).cast(int)  # pyright: ignore
+            x_base = (self.p_position[p] * self.inv_dx - x_stagger).cast(int)  # pyright: ignore
+            y_base = (self.p_position[p] * self.inv_dx - y_stagger).cast(int)  # pyright: ignore
             c_fx = self.p_position[p] * self.inv_dx - c_base.cast(float)
-            x_fx = self.p_position[p] * self.inv_dx - (ti.Vector([0.5, 0]) + x_base.cast(float))
-            y_fx = self.p_position[p] * self.inv_dx - (ti.Vector([0, 0.5]) + y_base.cast(float))
+            x_fx = self.p_position[p] * self.inv_dx - (x_base.cast(float) + ti.Vector([0, 0.5]))
+            y_fx = self.p_position[p] * self.inv_dx - (y_base.cast(float) + ti.Vector([0.5, 0]))
             c_w = [0.5 * (1.5 - c_fx) ** 2, 0.75 - (c_fx - 1) ** 2, 0.5 * (c_fx - 0.5) ** 2]
             x_w = [0.5 * (1.5 - x_fx) ** 2, 0.75 - (x_fx - 1) ** 2, 0.5 * (x_fx - 0.5) ** 2]
             y_w = [0.5 * (1.5 - y_fx) ** 2, 0.75 - (y_fx - 1) ** 2, 0.5 * (y_fx - 0.5) ** 2]
-            # x_g = [x_fx - 1.5, (-2) * (x_fx - 1), x_fx - 3.5]
-            # y_g = [y_fx - 1.5, (-2) * (y_fx - 1), y_fx - 3.5]
+
             for i, j in ti.static(ti.ndrange(3, 3)):  # Loop over 3x3 grid node neighborhood
                 offset = ti.Vector([i, j])
                 c_weight = c_w[i][0] * c_w[j][1]
                 x_weight = x_w[i][0] * x_w[j][1]
                 y_weight = y_w[i][0] * y_w[j][1]
-                c_dpos = (offset.cast(float) - c_fx) * self.dx
+                # c_dpos = (offset.cast(float) - c_fx) * self.dx
                 x_dpos = (offset.cast(float) - x_fx) * self.dx
                 y_dpos = (offset.cast(float) - y_fx) * self.dx
 
-                # x_gradient = ti.Vector([x_g[i][0] * x_w[j][1], x_w[i][0] * x_g[j][1]])
-                # y_gradient = ti.Vector([y_g[i][0] * y_w[j][1], y_w[i][0] * y_g[j][1]])
-
-                # Rasterize to cell centers.
-                # TODO: JE, J and others might need to be computed
-                self.cell_mass[c_base + offset] += c_weight * self.p_mass[p]
-                self.cell_capacity[c_base + offset] += c_weight * self.p_capacity[p]
-                self.cell_temperature[c_base + offset] += c_weight * self.p_temperature[p]
+                # print("=" * 200)
+                # print("position -> ", self.p_position[p])
+                # print("x_base   -> ", x_base)
+                # print("x_fx     -> ", x_fx)
+                # print("x_weight -> ", x_weight)
+                # print("offset   -> ", offset)
+                # print("b + o    -> ", x_base + offset)
+                # print()
 
                 # Rasterize mass to grid faces.
                 self.face_mass_x[x_base + offset] += x_weight * self.p_mass[p]
                 self.face_mass_y[y_base + offset] += y_weight * self.p_mass[p]
 
                 # Rasterize velocity to grid faces.
-                x_D_inv = tm.inverse(x_weight * x_dpos.outer_product(x_dpos))
-                y_D_inv = tm.inverse(y_weight * y_dpos.outer_product(y_dpos))
-                bp_x_T = ti.Matrix([self.bp_x[p][0], self.bp_x[p][1]])
-                bp_y_T = ti.Matrix([self.bp_y[p][0], self.bp_y[p][1]])
-                x_velocity = self.p_velocity[p][0] + bp_x_T @ (x_D_inv @ x_dpos)
-                y_velocity = self.p_velocity[p][1] + bp_y_T @ (y_D_inv @ y_dpos)
-                self.face_velocity_x[x_base + offset] += x_weight * self.p_mass[p] * x_velocity
-                self.face_velocity_y[y_base + offset] += y_weight * self.p_mass[p] * y_velocity
+                # x_velocity = self.p_mass[p] * (self.p_velocity[p][0] + self.cp_x[p] @ x_dpos)
+                # y_velocity = self.p_mass[p] * (self.p_velocity[p][1] + self.cp_y[p] @ y_dpos)
+                x_velocity = self.p_mass[p] * (self.p_velocity[p][0] + x_affine @ x_dpos)
+                y_velocity = self.p_mass[p] * (self.p_velocity[p][1] + y_affine @ y_dpos)
+                self.face_velocity_x[x_base + offset] += x_weight * x_velocity  # + x_stress
+                self.face_velocity_y[y_base + offset] += y_weight * y_velocity  # + y_stress
 
                 # Rasterize conductivity to grid faces.
                 self.face_conductivity_x[x_base + offset] += x_weight * self.p_mass[p] * self.p_conductivity[p]
                 self.face_conductivity_y[y_base + offset] += y_weight * self.p_mass[p] * self.p_conductivity[p]
 
-                # self.face_force_x[x_base + offset] += ti.Vector([1, 0]) @ stress @ x_gradient
-                # self.face_force_y[y_base + offset] += ti.Vector([0, 1]) @ stress @ y_gradient
-
-                # print()
-                # print("=" * 200)
-                # print("mass:", self.p_mass[p])
-                # print("x_weight:", x_weight)
-                # print("x_velocity:", x_velocity)
-                # print("y_velocity:", y_velocity)
-                # print("position:", self.p_position[p])
-                # print("xface_base:", x_base)
-                # print("face_mass_x:", self.face_mass_x[x_base + offset])
-                # print("face_velocity_x:", self.face_velocity_x[x_base + offset])
-                # print("yface_base:", y_base)
-                # print("face_mass_y:", self.face_mass_y[y_base + offset])
-                # print("face_velocity_y:", self.face_velocity_y[y_base + offset])
+                # Rasterize to cell centers.
+                # TODO: JE, JP, J and others might need to be computed here???
+                self.cell_mass[c_base + offset] += c_weight * self.p_mass[p]
+                self.cell_capacity[c_base + offset] += c_weight * self.p_capacity[p]
+                self.cell_temperature[c_base + offset] += c_weight * self.p_temperature[p]
+                self.cell_inv_lambda[c_base + offset] += c_weight * self.p_inv_lambda[p]
 
     @ti.kernel
     def classify_cells(self):
@@ -295,8 +290,7 @@ class ThermodynamicModel:
     def momentum_to_velocity(self):
         for i, j in self.face_mass_x:
             if self.face_mass_x[i, j] > 0:  # No need for epsilon here
-                self.face_velocity_x[i, j] = (1 / self.face_mass_x[i, j]) * self.face_velocity_x[i, j]
-                # self.face_velocity_x[i, j] += (1 / self.face_mass_x[i, j]) * self.face_force_x[i, j]
+                self.face_velocity_x[i, j] *= 1 / self.face_mass_x[i, j]
                 self.face_velocity_x[i, j] += self.dt * self.gravity[None][0]
                 collision_left = i < 3 and self.face_velocity_x[i, j] < 0
                 collision_right = i > (self.n_grid - 3) and self.face_velocity_x[i, j] > 0
@@ -304,103 +298,82 @@ class ThermodynamicModel:
                     self.face_velocity_x[i, j] = 0
         for i, j in self.face_mass_y:
             if self.face_mass_y[i, j] > 0:  # No need for epsilon here
-                self.face_velocity_y[i, j] = (1 / self.face_mass_y[i, j]) * self.face_velocity_y[i, j]
-                # self.face_velocity_y[i, j] += (1 / self.face_mass_y[i, j]) * self.face_force_y[i, j]
+                self.face_velocity_y[i, j] *= 1 / self.face_mass_y[i, j]
                 self.face_velocity_y[i, j] += self.dt * self.gravity[None][1]
                 collision_top = j > (self.n_grid - 3) and self.face_velocity_y[i, j] > 0
                 collision_bottom = j < 3 and self.face_velocity_y[i, j] < 0
                 if collision_top or collision_bottom:
                     self.face_velocity_y[i, j] = 0
+        for i, j in self.cell_mass:
+            if self.cell_mass[i, j] > 0:  # No need for epsilon here
+                self.cell_mass[i, j] *= 1 / self.cell_mass[i, j]
+                self.cell_capacity[i, j] *= 1 / self.cell_mass[i, j]
+                self.cell_temperature[i, j] *= 1 / self.cell_mass[i, j]
+                self.cell_inv_lambda[i, j] *= 1 / self.cell_mass[i, j]
+
+    @ti.kernel
+    def N(x):
+        x = ti.abs(x)
 
     @ti.kernel
     def grid_to_particle(self):
         for p in self.p_position:
-            c_base = (self.p_position[p] * self.inv_dx - 0.5).cast(int)
-            c_fx = self.p_position[p] * self.inv_dx - c_base.cast(float)
-            c_w = [0.5 * (1.5 - c_fx) ** 2, 0.75 - (c_fx - 1) ** 2, 0.5 * (c_fx - 0.5) ** 2]
-
-            # xface_inv_dx = ti.Vector([1 / (self.n_grid + 1), 1 / self.n_grid])
-            x_base = (self.p_position[p] * self.inv_dx - ti.Vector([1, 0.5])).cast(int)
-            x_fx = self.p_position[p] * self.inv_dx - (ti.Vector([0.5, 0]) + x_base.cast(float))
+            x_stagger = ti.Vector([0.5, 1.0])  # -(0.5, 0.0) + (0.5, 0.5)
+            y_stagger = ti.Vector([1.0, 0.5])  # -(0.0, 0.5) + (0.5, 0.5)
+            x_base = (self.p_position[p] * self.inv_dx - x_stagger).cast(int)  # pyright: ignore
+            y_base = (self.p_position[p] * self.inv_dx - y_stagger).cast(int)  # pyright: ignore
+            x_fx = self.p_position[p] * self.inv_dx - (x_base.cast(float) + ti.Vector([0, 0.5]))
+            y_fx = self.p_position[p] * self.inv_dx - (y_base.cast(float) + ti.Vector([0.5, 0]))
             x_w = [0.5 * (1.5 - x_fx) ** 2, 0.75 - (x_fx - 1) ** 2, 0.5 * (x_fx - 0.5) ** 2]
-            x_g = [x_fx - 1.5, (-2) * (x_fx - 1), x_fx - 3.5]
-
-            # yface_inv_dx = ti.Vector([1 / self.n_grid, 1 / (self.n_grid + 1)])
-            y_base = (self.p_position[p] * self.inv_dx - ti.Vector([0.5, 1])).cast(int)
-            y_fx = self.p_position[p] * self.inv_dx - (ti.Vector([0, 0.5]) + y_base.cast(float))
             y_w = [0.5 * (1.5 - y_fx) ** 2, 0.75 - (y_fx - 1) ** 2, 0.5 * (y_fx - 0.5) ** 2]
-            y_g = [y_fx - 1.5, (-2) * (y_fx - 1), y_fx - 3.5]
 
-            n_velocity = ti.Vector.zero(float, 2)
-            # cp_x = ti.Vector.zero(float, 2)
-            # cp_y = ti.Vector.zero(float, 2)
-            n_C = ti.Matrix.zero(float, 2, 2)
-            bp_x = ti.Vector.zero(float, 2)
-            bp_y = ti.Vector.zero(float, 2)
+            # TODO: the cell values must be transferred back to the particles?!
+
+            bx = ti.Vector.zero(float, 2)
+            by = ti.Vector.zero(float, 2)
+            nv = ti.Vector.zero(float, 2)
+
             for i, j in ti.static(ti.ndrange(3, 3)):  # Loop over 3x3 grid node neighborhood
-                c_weight = c_w[i][0] * c_w[j][1]
+                offset = ti.Vector([i, j])
                 x_weight = x_w[i][0] * x_w[j][1]
                 y_weight = y_w[i][0] * y_w[j][1]
-                # x_gradient = x_g[i][0] * x_g[j][1]
-                # y_gradient = y_g[i][0] * y_g[j][1]
-                # x_gradient = ti.Vector([x_g[i][0] * x_w[j][1], x_w[i][0] * x_g[j][1]])
-                # y_gradient = ti.Vector([y_g[i][0] * y_w[j][1], y_w[i][0] * y_g[j][1]])
-                offset = ti.Vector([i, j])
-                dpos = offset.cast(float) - c_fx
                 x_dpos = offset.cast(float) - x_fx
                 y_dpos = offset.cast(float) - y_fx
                 x_velocity = x_weight * self.face_velocity_x[x_base + offset]
                 y_velocity = y_weight * self.face_velocity_y[y_base + offset]
-                # cp_x += 4 * self.inv_dx * x_weight * ti.Vector([x, 0]) * x_dpos
-                # cp_y += 4 * self.inv_dx * y_weight * ti.Vector([0, y]) * y_dpos
-                # c_velocity = ti.Vector([x, y])
-                bp_x += x_weight * x_velocity * x_dpos
-                bp_y += y_weight * y_velocity * y_dpos
-                # cp_x += x_gradient * c_velocity
-                # cp_y += y_gradient * c_velocity
-                velocity = ti.Vector([x_velocity, y_velocity])
-                # n_C += 4 * self.inv_dx * c_weight * velocity.outer_product(dpos)
-                n_velocity += velocity
-            self.p_velocity[p] = n_velocity
-            # self.cp_x[p], self.cp_y[p] = cp_x, cp_y
-            self.bp_x[p], self.bp_y[p] = bp_x, bp_y
-            self.p_position[p] += self.dt * n_velocity  # Advection
-            self.C[p] = n_C
-            # TODO: set the color somewhere after computing temperature and setting phase
+                nv += ti.Vector([x_velocity, y_velocity])
+                bx += x_weight * x_velocity * x_dpos
+                by += y_weight * y_velocity * y_dpos
+
+            cx = 4 * self.inv_dx * self.inv_dx * bx # C = B @ (D^(-1))
+            cy = 4 * self.inv_dx * self.inv_dx * by # C = B @ (D^(-1))
+            self.cp_x[p], self.cp_y[p] = cx, cy
+            self.C[p] = ti.Matrix([[cx[0], cy[0]], [cx[1], cy[1]]])  # pyright: ignore
+
+            self.p_velocity[p] = nv
+            self.p_position[p] += self.dt * nv
             self.p_color[p] = Color.Water if self.p_phase[p] == Phase.Water else Color.Ice
+            # TODO: set the color somewhere after setting the new phase
 
     @ti.kernel
     def reset(self):
-        ### New ================================================================
-        # TODO: some of this might not be needed
-        for i, j in self.face_mass_x:
-            self.face_mass_x[i, j] = 0
-        for i, j in self.face_mass_y:
-            self.face_mass_y[i, j] = 0
-        for i, j in self.face_velocity_x:
-            self.face_velocity_x[i, j] = 0
-        for i, j in self.face_velocity_y:
-            self.face_velocity_y[i, j] = 0
-        for i, j in self.cell_classification:
-            self.cell_classification[i, j] = Classification.Empty
-        for i, j in self.cell_pressure:
-            self.cell_pressure[i, j] = 0
-        ### ====================================================================
         for i in range(self.n_particles):
-            self.p_position[i] = [(ti.random() * 0.1) + 0.45, (ti.random() * 0.1) + 0.001]
-            # self.p_position[i] = [(ti.random() * 0.1) + 0.45, (ti.random() * 0.1) + 0.25]
+            # self.p_position[i] = [(ti.random() * 0.1) + 0.45, (ti.random() * 0.1) + 0.001]
+            self.p_position[i] = [(ti.random() * 0.1) + 0.45, (ti.random() * 0.1) + 0.25]
             # material[i] = i // group_size  # 0: fluid 1: jelly 2: snow
             self.F[i] = ti.Matrix([[1, 0], [0, 1]])
             self.C[i] = ti.Matrix.zero(float, 2, 2)
             ### New ============================================================
-            self.p_phase[i] = Phase.Water
-            self.p_color[i] = Color.Water
+            self.p_phase[i] = Phase.Ice
+            self.p_color[i] = Color.Ice
             self.p_mass[i] = self.p_vol * self.rho_0  # TODO: ???
             self.cp_x[i] = [0, 0]
             self.cp_y[i] = [0, 0]
             ### ================================================================
             self.p_velocity[i] = [0, 0]
             self.JP[i] = 1
+            self.JE[i] = 1
+            self.J[i] = 1
 
     def handle_events(self):
         if self.window.get_event(ti.ui.PRESS):
@@ -471,7 +444,7 @@ def main():
     ti.init(arch=ti.gpu)
 
     quality = 3
-    n_particles = 1_000 * (quality**2)
+    n_particles = 3_000 * (quality**2)
 
     print("-" * 150)
     print("[Hint] Press R to [R]eset, P|SPACE to [P]ause/un[P]ause and S|BACKSPACE to [S]tart recording!")
