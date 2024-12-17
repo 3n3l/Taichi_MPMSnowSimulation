@@ -38,14 +38,14 @@ def enforce_boundary_condition():
 @ti.kernel
 def compute_velocity():
     for i,j in ti.ndrange((1,nx+1),(1,ny+2)):
-        ut[i,j] = u[i,j] + dt * ((-0.25)*
+        ut[i,j] += dt * ((-0.25)*
            (((u[i+1,j] + u[i,j])**2 - (u[i,j] + u[i-1,j])**2) / dx
            +((u[i,j+1] + u[i,j]) * (v[i+1,j] + v[i,j])
            -(u[i,j] + u[i,j-1]) * (v[i+1,j-1] + v[i,j-1])) / dy)
            +(mu) * ((u[i+1,j] - 2 * u[i,j] + u[i-1,j]) / dx ** 2
            +(u[i,j+1] - 2 * u[i,j] + u[i,j-1]) / dy ** 2))
     for i,j in ti.ndrange((1,nx+2),(1,ny+1)):
-        vt[i,j] = v[i,j] + dt * ((-0.25)*\
+        vt[i,j] += dt * ((-0.25)*\
           (((u[i,j+1] + u[i,j]) * (v[i+1,j]+v[i,j])\
           -(u[i-1,j+1] + u[i-1,j]) * (v[i,j]+v[i-1,j])) / dx\
           +((v[i,j+1]+v[i,j]) ** 2-(v[i,j]+v[i,j-1]) ** 2) / dy)\
