@@ -1,5 +1,5 @@
 from datetime import datetime
-from taichi.lang.matrix_ops import Vector, determinant
+from taichi.lang.matrix_ops import determinant
 import taichi.math as tm
 import taichi as ti
 import os
@@ -45,8 +45,6 @@ class ThermodynamicModel:
         self.n_grid = 128 * quality
         self.dx = 1 / self.n_grid
         self.inv_dx = float(self.n_grid)
-        ### New parameters ====================================================
-        ### ===================================================================
         self.dt = 1e-4 / self.quality
         self.rho_0 = 4e2
         self.p_vol = (self.dx * 0.5) ** 2
@@ -100,17 +98,14 @@ class ThermodynamicModel:
         self.window = ti.ui.Window(name="MLS-MPM", res=(720, 720), fps_limit=60)
         self.gui = self.window.get_gui()
         self.canvas = self.window.get_canvas()
-        self.frame = 0
         self.is_paused = True
         self.should_write_to_disk = False
         self.is_showing_settings = not self.is_paused
-
-        # Create folders to dump the frames
-        self.directory = datetime.now().strftime("%d%m%Y_%H%M")
-        if not os.path.exists(".output"):
-            os.makedirs(".output")
-        if not os.path.exists(f".output/{self.directory}"):
-            os.makedirs(f".output/{self.directory}")
+        # Create a parent directory, in there folders will be created containing
+        # newly created frames, videos and GIFs.
+        self.parent_dir = ".output"
+        if not os.path.exists(self.parent_dir):
+            os.makedirs(self.parent_dir)
 
         # Create fields
         self.p_position = ti.Vector.field(2, dtype=float, shape=self.n_particles)
@@ -145,15 +140,12 @@ class ThermodynamicModel:
 
     @ti.kernel
     def reset_grids(self):
-        for i, j in self.face_mass_x:
-            self.face_velocity_x[i, j] = 0
-            self.face_mass_x[i, j] = 0
-        for i, j in self.face_mass_y:
-            self.face_velocity_y[i, j] = 0
-            self.face_mass_y[i, j] = 0
-        for i, j in self.cell_mass:
-            self.cell_classification[i, j] = Classification.Empty
-            self.cell_mass[i, j] = 0
+        self.cell_classification.fill(0)
+        self.face_velocity_x.fill(0)
+        self.face_velocity_y.fill(0)
+        self.face_mass_x.fill(0)
+        self.face_mass_y.fill(0)
+        self.cell_mass.fill(0)
 
     @ti.kernel
     def particle_to_grid(self):
@@ -162,9 +154,8 @@ class ThermodynamicModel:
             self.F[p] = (ti.Matrix.identity(float, 2) + self.dt * self.C[p]) @ self.F[p]
             # Apply snow hardening by adjusting Lame parameters
             h = ti.max(0.1, ti.min(5, ti.exp(self.zeta[None] * (1.0 - self.JP[p]))))
-            mu, la = self.mu_0[None] * h, self.lambda_0[None] * h
-            if self.p_phase[p] == Phase.Water:
-                mu = 0
+            mu = self.mu_0[None] * h if self.p_phase[p] == Phase.Ice else 0
+            la = self.lambda_0[None] * h
             U, sigma, V = ti.svd(self.F[p])
             J = 1.0
             for d in ti.static(range(self.n_dimensions)):  # Clamp singular values to [1 - theta_c, 1 + theta_s]
@@ -188,35 +179,64 @@ class ThermodynamicModel:
             self.JE[p] = determinant(FE)
             self.JP[p] = determinant(FP)
 
-            # Compute pressure.
-            # self.cell_temperature[c_base + offset] += c_weight * self.p_temperature[p]
-            # pressure = (-1 / self.JP[p]) * self.lambda_0 * (self.JE[p] - 1)
             ### ================================================================
+            # TODO: Compute pressure, correct pressure, apply pressure.
+            # pressure = (-1 / self.JP[p]) * self.lambda_0 * (self.JE[p] - 1)
 
-            # Compute Piola-Kirchhoff stress.
             # TODO: This might only need the elastic part? Or something else?
+            # stress = 2 * mu * (FE - U @ V.transpose()) @ FE.transpose()
+            # stress += ti.Matrix.identity(float, 2) * la * JE * (JE - 1)
+
+            # Compute Piola-Kirchhoff stress P(F), (JST16, Eqn. 52)
             stress = 2 * mu * (self.F[p] - U @ V.transpose()) @ self.F[p].transpose()
             stress += ti.Matrix.identity(float, 2) * la * J * (J - 1)
-            stress *= -self.dt * self.p_vol * 4 * self.inv_dx * self.inv_dx
-            x_affine = (stress + self.p_mass[p] * self.C[p]) @ ti.Vector([1, 0])
-            y_affine = (stress + self.p_mass[p] * self.C[p]) @ ti.Vector([0, 1])
 
-            # NOTE: Quadratic kernels (JST16, Eqn. 123, with x=fx, fx-1,fx-2)
-            # TODO: this might need cubic weights from the augmented mpm paper
-            c_stagger = ti.Vector([0.5, 0.5])  # -(0.0, 0.0) + (0.5, 0.5)
-            x_stagger = ti.Vector([0.5, 1.0])  # -(0.5, 0.0) + (0.5, 0.5)
-            y_stagger = ti.Vector([1.0, 0.5])  # -(0.0, 0.5) + (0.5, 0.5)
-            c_base = (self.p_position[p] * self.inv_dx - c_stagger).cast(int)  # pyright: ignore
-            x_base = (self.p_position[p] * self.inv_dx - x_stagger).cast(int)  # pyright: ignore
-            y_base = (self.p_position[p] * self.inv_dx - y_stagger).cast(int)  # pyright: ignore
+            # Compute D^(-1), which equals constant scaling for quadratic/cubic kernels.
+            # D_inv = 4 * self.inv_dx * self.inv_dx  # Quadratic interpolation
+            D_inv = 3 * self.inv_dx * self.inv_dx  # Cubic interpolation
+
+            # TODO: What happens here exactly? Something with Cauchy-stress?
+            stress *= -self.dt * self.p_vol * D_inv
+
+            # APIC momentum + MLS-MPM stress contribution ([Hu et al. 2018, Eqn. 29).
+            affine = stress + self.p_mass[p] * self.C[p]
+            x_affine = affine @ ti.Vector([1, 0])
+            y_affine = affine @ ti.Vector([0, 1])
+
+            # We use an additional offset of 0.5 for element-wise flooring.
+            c_stagger = ti.Vector([0.5, 0.5])  # = [0, 0]   + 0.5
+            x_stagger = ti.Vector([0.5, 1.0])  # = [0, 0.5] + 0.5
+            y_stagger = ti.Vector([1.0, 0.5])  # = [0.5, 0] + 0.5
+            c_base = (self.p_position[p] * self.inv_dx - c_stagger).cast(int)
+            x_base = (self.p_position[p] * self.inv_dx - x_stagger).cast(int)
+            y_base = (self.p_position[p] * self.inv_dx - y_stagger).cast(int)
             c_fx = self.p_position[p] * self.inv_dx - c_base.cast(float)
             x_fx = self.p_position[p] * self.inv_dx - (x_base.cast(float) + ti.Vector([0, 0.5]))
             y_fx = self.p_position[p] * self.inv_dx - (y_base.cast(float) + ti.Vector([0.5, 0]))
-            c_w = [0.5 * (1.5 - c_fx) ** 2, 0.75 - (c_fx - 1) ** 2, 0.5 * (c_fx - 0.5) ** 2]
-            x_w = [0.5 * (1.5 - x_fx) ** 2, 0.75 - (x_fx - 1) ** 2, 0.5 * (x_fx - 0.5) ** 2]
-            y_w = [0.5 * (1.5 - y_fx) ** 2, 0.75 - (y_fx - 1) ** 2, 0.5 * (y_fx - 0.5) ** 2]
+            # Quadratic kernels (JST16, Eqn. 123, with x=fx, fx-1,fx-2)
+            # c_w = [0.5 * (1.5 - c_fx) ** 2, 0.75 - (c_fx - 1) ** 2, 0.5 * (c_fx - 0.5) ** 2]
+            # x_w = [0.5 * (1.5 - x_fx) ** 2, 0.75 - (x_fx - 1) ** 2, 0.5 * (x_fx - 0.5) ** 2]
+            # y_w = [0.5 * (1.5 - y_fx) ** 2, 0.75 - (y_fx - 1) ** 2, 0.5 * (y_fx - 0.5) ** 2]
+            # Cubic kernels (JST16 Eqn. 122 with x=fx, abs(fx-1), abs(fx-2))
+            # Taken from https://github.com/taichi-dev/advanced_examples/blob/main/mpm/mpm99_cubic.py
+            # TODO: calculate own weights for x=fx, fx-1, fx-2
+            c_w = [
+                0.5 * c_fx**3 - c_fx**2 + 2.0 / 3.0,
+                0.5 * (-(c_fx - 1.0)) ** 3 - (-(c_fx - 1.0)) ** 2 + 2.0 / 3.0,
+                1.0 / 6.0 * (2.0 + (c_fx - 2.0)) ** 3,
+            ]
+            x_w = [
+                0.5 * x_fx**3 - x_fx**2 + 2.0 / 3.0,
+                0.5 * (-(x_fx - 1.0)) ** 3 - (-(x_fx - 1.0)) ** 2 + 2.0 / 3.0,
+                1.0 / 6.0 * (2.0 + (x_fx - 2.0)) ** 3,
+            ]
+            y_w = [
+                0.5 * y_fx**3 - y_fx**2 + 2.0 / 3.0,
+                0.5 * (-(y_fx - 1.0)) ** 3 - (-(y_fx - 1.0)) ** 2 + 2.0 / 3.0,
+                1.0 / 6.0 * (2.0 + (y_fx - 2.0)) ** 3,
+            ]
 
-            for i, j in ti.static(ti.ndrange(3, 3)):  # Loop over 3x3 grid node neighborhood
+            for i, j in ti.static(ti.ndrange(3, 3)):
                 offset = ti.Vector([i, j])
                 c_weight = c_w[i][0] * c_w[j][1]
                 x_weight = x_w[i][0] * x_w[j][1]
@@ -224,15 +244,6 @@ class ThermodynamicModel:
                 # c_dpos = (offset.cast(float) - c_fx) * self.dx
                 x_dpos = (offset.cast(float) - x_fx) * self.dx
                 y_dpos = (offset.cast(float) - y_fx) * self.dx
-
-                # print("=" * 200)
-                # print("position -> ", self.p_position[p])
-                # print("x_base   -> ", x_base)
-                # print("x_fx     -> ", x_fx)
-                # print("x_weight -> ", x_weight)
-                # print("offset   -> ", offset)
-                # print("b + o    -> ", x_base + offset)
-                # print()
 
                 # Rasterize mass to grid faces.
                 self.face_mass_x[x_base + offset] += x_weight * self.p_mass[p]
@@ -243,15 +254,14 @@ class ThermodynamicModel:
                 # y_velocity = self.p_mass[p] * (self.p_velocity[p][1] + self.cp_y[p] @ y_dpos)
                 x_velocity = self.p_mass[p] * (self.p_velocity[p][0] + x_affine @ x_dpos)
                 y_velocity = self.p_mass[p] * (self.p_velocity[p][1] + y_affine @ y_dpos)
-                self.face_velocity_x[x_base + offset] += x_weight * x_velocity  # + x_stress
-                self.face_velocity_y[y_base + offset] += y_weight * y_velocity  # + y_stress
+                self.face_velocity_x[x_base + offset] += x_weight * x_velocity
+                self.face_velocity_y[y_base + offset] += y_weight * y_velocity
 
                 # Rasterize conductivity to grid faces.
                 self.face_conductivity_x[x_base + offset] += x_weight * self.p_mass[p] * self.p_conductivity[p]
                 self.face_conductivity_y[y_base + offset] += y_weight * self.p_mass[p] * self.p_conductivity[p]
 
                 # Rasterize to cell centers.
-                # TODO: JE, JP, J and others might need to be computed here???
                 self.cell_mass[c_base + offset] += c_weight * self.p_mass[p]
                 self.cell_capacity[c_base + offset] += c_weight * self.p_capacity[p]
                 self.cell_temperature[c_base + offset] += c_weight * self.p_temperature[p]
@@ -287,6 +297,27 @@ class ThermodynamicModel:
                 self.cell_classification[i, j] = Classification.Empty
 
     @ti.kernel
+    def apply_pressure(self):
+        # Applying the pressure needs us to solve a linear equation Ax = b.
+        A = ti.Matrix.zero(ti.f32, self.n_grid, self.n_grid)
+        b = ti.Vector.zero(ti.f32, self.n_grid)
+
+        # @ti.func
+        # def sample(qf, u, v):
+        #     I = ti.Vector([int(u), int(v)])
+        #     I = ti.max(0, ti.min(res - 1, I))
+        #     return qf[I]
+
+        # def pressure_jacobi(pf: ti.template(), new_pf: ti.template()):
+        #     for i, j in pf:
+        #         pl = sample(pf, i - 1, j)
+        #         pr = sample(pf, i + 1, j)
+        #         pb = sample(pf, i, j - 1)
+        #         pt = sample(pf, i, j + 1)
+        #         div = velocity_divs[i, j]
+        #         new_pf[i, j] = (pl + pr + pb + pt - div) * 0.25
+
+    @ti.kernel
     def momentum_to_velocity(self):
         for i, j in self.face_mass_x:
             if self.face_mass_x[i, j] > 0:  # No need for epsilon here
@@ -312,18 +343,19 @@ class ThermodynamicModel:
                 self.cell_inv_lambda[i, j] *= 1 / self.cell_mass[i, j]
 
     @ti.kernel
-    def N(x):
-        x = ti.abs(x)
-
-    @ti.kernel
     def grid_to_particle(self):
         for p in self.p_position:
-            x_stagger = ti.Vector([0.5, 1.0])  # -(0.5, 0.0) + (0.5, 0.5)
-            y_stagger = ti.Vector([1.0, 0.5])  # -(0.0, 0.5) + (0.5, 0.5)
-            x_base = (self.p_position[p] * self.inv_dx - x_stagger).cast(int)  # pyright: ignore
-            y_base = (self.p_position[p] * self.inv_dx - y_stagger).cast(int)  # pyright: ignore
+            # c_stagger = ti.Vector([0.5, 0.5])
+            x_stagger = ti.Vector([0.5, 1.0])
+            y_stagger = ti.Vector([1.0, 0.5])
+            # c_base = (self.p_position[p] * self.inv_dx - c_stagger).cast(int)
+            x_base = (self.p_position[p] * self.inv_dx - x_stagger).cast(int)
+            y_base = (self.p_position[p] * self.inv_dx - y_stagger).cast(int)
+            # c_fx = self.p_position[p] * self.inv_dx - c_base.cast(float)
             x_fx = self.p_position[p] * self.inv_dx - (x_base.cast(float) + ti.Vector([0, 0.5]))
             y_fx = self.p_position[p] * self.inv_dx - (y_base.cast(float) + ti.Vector([0.5, 0]))
+            # TODO: use the tighter quadratic weights?
+            # c_w = [0.5 * (1.5 - c_fx) ** 2, 0.75 - (c_fx - 1) ** 2, 0.5 * (c_fx - 0.5) ** 2]
             x_w = [0.5 * (1.5 - x_fx) ** 2, 0.75 - (x_fx - 1) ** 2, 0.5 * (x_fx - 0.5) ** 2]
             y_w = [0.5 * (1.5 - y_fx) ** 2, 0.75 - (y_fx - 1) ** 2, 0.5 * (y_fx - 0.5) ** 2]
 
@@ -332,11 +364,13 @@ class ThermodynamicModel:
             bx = ti.Vector.zero(float, 2)
             by = ti.Vector.zero(float, 2)
             nv = ti.Vector.zero(float, 2)
-
+            # n_C = ti.Matrix.zero(float, 2, 2)
             for i, j in ti.static(ti.ndrange(3, 3)):  # Loop over 3x3 grid node neighborhood
                 offset = ti.Vector([i, j])
+                # c_weight = c_w[i][0] * c_w[j][1]
                 x_weight = x_w[i][0] * x_w[j][1]
                 y_weight = y_w[i][0] * y_w[j][1]
+                # c_dpos = offset.cast(float) - c_fx
                 x_dpos = offset.cast(float) - x_fx
                 y_dpos = offset.cast(float) - y_fx
                 x_velocity = x_weight * self.face_velocity_x[x_base + offset]
@@ -344,9 +378,11 @@ class ThermodynamicModel:
                 nv += ti.Vector([x_velocity, y_velocity])
                 bx += x_weight * x_velocity * x_dpos
                 by += y_weight * y_velocity * y_dpos
+                # n_C += 4 * self.inv_dx * c_weight * ti.Vector([x_velocity, y_velocity]).outer_product(c_dpos)
 
-            cx = 4 * self.inv_dx * self.inv_dx * bx # C = B @ (D^(-1))
-            cy = 4 * self.inv_dx * self.inv_dx * by # C = B @ (D^(-1))
+            # NOTE: inv_dx is not squared here, as the dpos computations cancels out one inv_dx.
+            cx = 4 * self.inv_dx * bx  # C = B @ (D^(-1))
+            cy = 4 * self.inv_dx * by  # C = B @ (D^(-1))
             self.cp_x[p], self.cp_y[p] = cx, cy
             self.C[p] = ti.Matrix([[cx[0], cy[0]], [cx[1], cy[1]]])  # pyright: ignore
 
@@ -360,13 +396,12 @@ class ThermodynamicModel:
         for i in range(self.n_particles):
             # self.p_position[i] = [(ti.random() * 0.1) + 0.45, (ti.random() * 0.1) + 0.001]
             self.p_position[i] = [(ti.random() * 0.1) + 0.45, (ti.random() * 0.1) + 0.25]
-            # material[i] = i // group_size  # 0: fluid 1: jelly 2: snow
             self.F[i] = ti.Matrix([[1, 0], [0, 1]])
             self.C[i] = ti.Matrix.zero(float, 2, 2)
             ### New ============================================================
+            self.p_mass[i] = self.p_vol * self.rho_0
             self.p_phase[i] = Phase.Ice
             self.p_color[i] = Color.Ice
-            self.p_mass[i] = self.p_vol * self.rho_0  # TODO: ???
             self.cp_x[i] = [0, 0]
             self.cp_y[i] = [0, 0]
             ### ================================================================
@@ -392,6 +427,7 @@ class ThermodynamicModel:
                 self.reset_grids()
                 self.particle_to_grid()
                 self.classify_cells()
+                # self.apply_pressure()
                 self.momentum_to_velocity()
                 self.grid_to_particle()
 
@@ -406,7 +442,23 @@ class ThermodynamicModel:
 
     def show_buttons(self, subwindow):
         if subwindow.button(" Stop recording  " if self.should_write_to_disk else " Start recording "):
+            # This button toggles between saving frames and not saving frames.
             self.should_write_to_disk = not self.should_write_to_disk
+            if self.should_write_to_disk:
+                # Create directory to dump frames, videos and GIFs.
+                date = datetime.now().strftime("%d%m%Y_%H%M")
+                output_dir = f"{self.parent_dir}/{date}"
+                os.makedirs(output_dir)
+                # Create a VideoManager to save frames, videos and GIFs.
+                self.video_manager = ti.tools.VideoManager(
+                    output_dir=output_dir,
+                    framerate=24,
+                    automatic_build=False,
+                )
+            else:
+                # Convert stored frames to video and GIF.
+                self.video_manager.make_video(gif=True, mp4=True)
+
         if subwindow.button(" Reset Particles "):
             self.reset()
         if subwindow.button(" Start Simulation"):
@@ -425,12 +477,10 @@ class ThermodynamicModel:
         self.canvas.set_background_color((0.054, 0.06, 0.09))
         self.canvas.circles(centers=self.p_position, radius=0.001, per_vertex_color=self.p_color)
         if self.should_write_to_disk and not self.is_paused and not self.is_showing_settings:
-            self.window.save_image(f".output/{self.directory}/{self.frame:06d}.png")
-            self.frame += 1
+            self.video_manager.write_frame(self.window.get_image_buffer_as_numpy())
         self.window.show()
 
     def run(self):
-        # self.init()
         self.reset()
         while self.window.running:
             self.handle_events()
@@ -443,7 +493,7 @@ def main():
     # ti.init(arch=ti.cpu, debug=True)
     ti.init(arch=ti.gpu)
 
-    quality = 3
+    quality = 2
     n_particles = 3_000 * (quality**2)
 
     print("-" * 150)
